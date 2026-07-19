@@ -1,8 +1,17 @@
 import SwiftUI
+import AppKit
+
+@MainActor
+final class KnowledgeMasterAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillTerminate(_ notification: Notification) {
+        AgentProcessRegistry.shared.terminateAll()
+    }
+}
 
 @main
 @MainActor
 struct KnowledgeMasterApp: App {
+    @NSApplicationDelegateAdaptor(KnowledgeMasterAppDelegate.self) private var appDelegate
     @StateObject private var store = KnowledgeStore()
     @StateObject private var settings = AppSettings()
 

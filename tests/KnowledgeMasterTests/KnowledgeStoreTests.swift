@@ -66,6 +66,11 @@ final class KnowledgeStoreTests: XCTestCase {
         XCTAssertGreaterThan(rendered.runs.count, 1)
     }
 
+    func testReturnSendsAndShiftReturnKeepsNewline() {
+        XCTAssertTrue(ChatComposerBehavior.shouldSendOnReturn(shiftPressed: false))
+        XCTAssertFalse(ChatComposerBehavior.shouldSendOnReturn(shiftPressed: true))
+    }
+
     func testAnnotationReferencesRoundTripForPDFAndRichTextClicks() {
         let id = UUID()
         XCTAssertEqual(KnowledgeAnnotationReference.id(fromPDFContents: KnowledgeAnnotationReference.pdfContents(for: id)), id)
@@ -107,6 +112,20 @@ final class KnowledgeStoreTests: XCTestCase {
         XCTAssertTrue(prompt.contains("只能读取这里的文件"))
         XCTAssertTrue(prompt.contains("documents/1-a.md"))
         XCTAssertTrue(prompt.contains("比较两份资料"))
+    }
+
+    func testAppTerminationStopsRegisteredAgentProcesses() throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        process.arguments = ["30"]
+        try process.run()
+        AgentProcessRegistry.shared.register(process)
+        XCTAssertEqual(AgentProcessRegistry.shared.runningCount, 1)
+
+        AgentProcessRegistry.shared.terminateAll()
+        process.waitUntilExit()
+        XCTAssertFalse(process.isRunning)
+        XCTAssertEqual(AgentProcessRegistry.shared.runningCount, 0)
     }
 
     func testOldChatMessageWithoutBackendRemainsCompatible() throws {

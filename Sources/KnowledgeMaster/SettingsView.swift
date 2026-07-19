@@ -30,6 +30,23 @@ struct SettingsView: View {
                 if !agentStatus.isEmpty { Text(agentStatus).font(.caption).foregroundStyle(.secondary) }
                 Text("Agent 模式只会收到本轮选中文档的临时文本副本；Claude Code 仅开放只读搜索工具，Codex 使用只读临时沙箱。登录和订阅由对应 CLI 管理。")
                     .font(.caption).foregroundStyle(.secondary)
+                DisclosureGroup("Claude Code / Codex 接入步骤") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("同一台 Mac")
+                            .font(.caption.bold())
+                        Text("Claude Code：npm install -g @anthropic-ai/claude-code\nCodex：brew install --cask codex")
+                            .font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled)
+                        Text("1. 安装后在终端运行 claude 或 codex。\n2. 按 CLI 提示完成账号登录，并先确认可正常回答。\n3. 完全退出并重新打开知屿。\n4. 在这里选择对应后端，点击“测试”。")
+                            .font(.caption)
+                        Text("CLI 在另一台机器")
+                            .font(.caption.bold())
+                        Text("当前版本不直接通过 SSH 调用远程 CLI，因为每轮还需要安全传输选中文档、回收临时文件并终止远程进程。可选择：① 在装有 CLI 的远程 Mac 上运行知屿，并通过 iCloud 同步知识库；② 本机改用“直接 API”。不要只把 ssh 命令伪装成 claude/codex，可见的本地临时路径在远程并不存在。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.top, 4)
+                }
             }
             Section("模型连接") {
                 Picker("服务商", selection: Binding(get: { settings.provider }, set: { settings.applyDefaults(for: $0) })) {

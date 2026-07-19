@@ -50,7 +50,7 @@ func render(size: Int, to url: URL) throws {
     NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
     let font = NSFont(name: "PingFangSC-Semibold", size: CGFloat(size) * 0.56)
         ?? NSFont.systemFont(ofSize: CGFloat(size) * 0.56, weight: .semibold)
-    let text = "知" as NSString
+    let text = "屿" as NSString
     let attributes: [NSAttributedString.Key: Any] = [
         .font: font,
         .foregroundColor: NSColor.white,

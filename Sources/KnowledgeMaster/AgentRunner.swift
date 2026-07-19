@@ -1,5 +1,27 @@
 import Foundation
 
+@MainActor
+final class AgentProcessRegistry {
+    static let shared = AgentProcessRegistry()
+    private var processes: [ObjectIdentifier: Process] = [:]
+
+    var runningCount: Int { processes.values.filter(\.isRunning).count }
+
+    func register(_ process: Process) {
+        processes[ObjectIdentifier(process)] = process
+    }
+
+    func unregister(_ process: Process) {
+        processes.removeValue(forKey: ObjectIdentifier(process))
+    }
+
+    func terminateAll() {
+        let running = processes.values.filter(\.isRunning)
+        processes.removeAll()
+        for process in running { process.terminate() }
+    }
+}
+
 enum AgentRunner {
     static let timeoutSeconds: TimeInterval = 180
 
@@ -147,6 +169,8 @@ enum AgentRunner {
 
         do { try process.run() }
         catch { throw AgentRunnerError.launchFailed(backend.name, error.localizedDescription) }
+        await MainActor.run { AgentProcessRegistry.shared.register(process) }
+        defer { Task { @MainActor in AgentProcessRegistry.shared.unregister(process) } }
 
         let startedAt = Date()
         while process.isRunning && Date().timeIntervalSince(startedAt) < timeoutSeconds {

@@ -7,6 +7,10 @@ enum ChatMarkdownRenderer {
     }
 }
 
+enum ChatComposerBehavior {
+    static func shouldSendOnReturn(shiftPressed: Bool) -> Bool { !shiftPressed }
+}
+
 struct ChatView: View {
     @EnvironmentObject private var store: KnowledgeStore
     @EnvironmentObject private var settings: AppSettings
@@ -47,8 +51,10 @@ struct ChatView: View {
                         if sending { ProgressView(settings.chatBackend == .direct ? "正在检索并回答…" : "正在由 \(settings.chatBackend.name) 检索资料…").frame(maxWidth: .infinity, alignment: .leading) }
                     }.padding(12)
                 }
+                .background(Color(nsColor: .windowBackgroundColor))
                 .onChange(of: conversation.messages.count) { _, _ in if let last = conversation.messages.last { proxy.scrollTo(last.id, anchor: .bottom) } }
             }
+            Divider()
             if let quote {
                 HStack(alignment: .top) {
                     Text(quote.text).lineLimit(3).font(.caption).foregroundStyle(.secondary)
@@ -109,23 +115,44 @@ struct ChatView: View {
     }
 
     private var composer: some View {
-        VStack(spacing: 6) {
-            TextEditor(text: $draft).font(.body).frame(minHeight: 48, maxHeight: 110).scrollContentBackground(.hidden)
+        VStack(alignment: .leading, spacing: 7) {
+            Text("回复").font(.caption.bold()).foregroundStyle(.secondary)
+            TextEditor(text: $draft)
+                .font(.body)
+                .frame(minHeight: 52, maxHeight: 110)
+                .padding(6)
+                .scrollContentBackground(.hidden)
+                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.accentColor.opacity(0.28)))
+                .onKeyPress(.return, phases: [.down]) { keyPress in
+                    let shouldSend = ChatComposerBehavior.shouldSendOnReturn(shiftPressed: keyPress.modifiers.contains(.shift))
+                    guard shouldSend else { return .ignored }
+                    guard !sending, !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .handled }
+                    Task { await send() }
+                    return .handled
+                }
             HStack {
                 Text(backendStatus).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 Spacer()
+                Text("Enter 发送 · Shift+Enter 换行").font(.caption2).foregroundStyle(.tertiary)
                 Button { Task { await send() } } label: { Image(systemName: "arrow.up.circle.fill").font(.title2) }
                     .buttonStyle(.plain).disabled(sending || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-        }.padding(9).background(.background, in: RoundedRectangle(cornerRadius: 10)).padding(10)
+        }.padding(12).background(.bar)
     }
 
     private func messageView(_ message: ChatMessage) -> some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text(message.role == "user" ? "你" : (ChatBackend(rawValue: message.backend ?? "")?.name ?? "AI 助手"))
-                .font(.caption.bold()).foregroundStyle(.secondary)
+            Label(message.role == "user" ? "你" : (ChatBackend(rawValue: message.backend ?? "")?.name ?? "AI 助手"),
+                  systemImage: message.role == "user" ? "person.crop.circle.fill" : "sparkles")
+                .font(.caption.bold())
+                .foregroundStyle(message.role == "user" ? Color.accentColor : Color.secondary)
             Text(ChatMarkdownRenderer.render(message.content)).textSelection(.enabled).padding(9)
-                .background(message.role == "user" ? Color.accentColor.opacity(0.16) : Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 9))
+                .background(message.role == "user" ? Color.accentColor.opacity(0.18) : Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 9))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 9)
+                        .stroke(message.role == "user" ? Color.accentColor.opacity(0.30) : Color.secondary.opacity(0.18))
+                }
             if let sources = message.sources, !sources.isEmpty {
                 Text(sources.map { "[\($0.label)] \($0.documentName)" }.joined(separator: "  ")).font(.caption2).foregroundStyle(.secondary)
             }

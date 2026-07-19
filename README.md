@@ -85,6 +85,37 @@ Claude Code / Codex Agent 模式会为每轮问答创建临时隔离目录，将
 - Codex 使用 `read-only` 沙箱、`--ephemeral` 临时会话，并忽略用户配置和项目规则。
 - Agent 最多接收 1000 万字符的文档副本，最长执行 3 分钟；结束、失败或取消后清理临时目录。
 - Agent 登录、订阅和凭据由对应 CLI 自己管理，知屿不会复制或保存这些凭据。
+- 退出知屿时，所有仍在运行的 Claude Code / Codex 子进程都会收到终止信号；正常完成的每轮调用本来也会立即退出，不保留 Agent 会话。
+
+## Claude Code / Codex 接入步骤
+
+CLI 与知屿位于同一台 Mac 时：
+
+1. 安装所需 CLI。Claude Code 的标准安装命令为：
+
+   ```bash
+   npm install -g @anthropic-ai/claude-code
+   ```
+
+   Codex 在 macOS 上可以使用 Homebrew 安装：
+
+   ```bash
+   brew install --cask codex
+   ```
+
+2. 在终端运行 `claude` 或 `codex`，按 CLI 提示完成账号登录，并先确认可以正常回答。Codex 可选择“Sign in with ChatGPT”。
+3. 完全退出并重新打开知屿。
+4. 打开“设置 → 聊天执行后端”，选择 Claude Code 或 Codex。
+5. 点击对应的“测试”；成功后即可在聊天栏切换到该 Agent。
+
+安装命令参考：[Claude Code 官方设置文档](https://docs.anthropic.com/en/docs/claude-code/getting-started)、[OpenAI Codex CLI 官方仓库](https://github.com/openai/codex)。
+
+CLI 位于另一台机器时，当前版本不直接通过 SSH 调用。远程 Agent 不只是执行一条命令，还需要把本轮选中文档安全传到远端、隔离运行、取回答案、删除临时资料，并在取消或退出时终止远端进程。当前可选方案：
+
+1. 如果远端也是 Mac，在远端安装并运行知屿与 Agent CLI，通过 iCloud Drive 同步知识库，再使用远程桌面操作。
+2. 如果知屿必须运行在本机，切换到“直接 API”，配置 DeepSeek、GLM 或 OpenAI 兼容服务。
+
+不要仅创建一个名为 `claude` 或 `codex` 的 SSH 包装脚本：知屿创建的临时文档路径只存在于本机，这样既无法正确读取资料，也无法保证远端清理和退出行为。
 
 ## 第一版边界
 
