@@ -7,12 +7,14 @@ const state = {
   data: null,
   currentTopicId: null,
   currentDocument: null,
+  openTabs: [],
   currentConversation: null,
   scopeDocumentIds: [],
   scopeTopicIds: [],
   currentQuote: null,
   selectedText: '',
   pdfMode: 'preview',
+  includeCurrentPage: true,
   busy: false
 };
 
@@ -47,11 +49,15 @@ function friendlyError(error) {
 
 function updateState(next) {
   state.data = next;
-  $('#storageStatus').textContent = `${state.data.documents.length} 份资料 · 本地存储`;
+  renderStorageStatus();
   renderTopics();
   renderDocuments();
   renderScope();
   renderModelIndicator();
+}
+
+function renderStorageStatus() {
+  $('#storageStatus').textContent = `${state.data.documents.length} 份资料 · ${state.data.syncMode === 'icloud' ? 'iCloud Drive' : '本地存储'}`;
 }
 
 function documentsForTopic(topicId) {
@@ -167,8 +173,14 @@ async function deleteDocument(documentId) {
   if (!window.confirm(`从知识库永久删除「${document?.name}」及其 source 副本？`)) return;
   try {
     updateState(await window.knowledge.deleteDocument(documentId));
+    state.openTabs = state.openTabs.filter((id) => id !== documentId);
     state.scopeDocumentIds = state.scopeDocumentIds.filter((id) => id !== documentId);
-    if (state.currentDocument?.id === documentId) resetReader();
+    if (state.currentDocument?.id === documentId) {
+      const fallbackId = state.openTabs.at(-1);
+      if (fallbackId) await openDocument(fallbackId);
+      else resetReader();
+    }
+    renderReaderTabs();
     renderScope();
     showToast('文档已从知识库删除');
   } catch (error) { showToast(friendlyError(error)); }
@@ -180,16 +192,19 @@ function resetReader() {
   $('#readerContent').classList.add('hidden');
   $('#readerContent').innerHTML = '';
   $('#readerEmpty').classList.remove('hidden');
+  renderReaderTabs();
 }
 
 async function openDocument(documentId, page = null) {
   try {
     const document = await window.knowledge.getDocument(documentId);
     state.currentDocument = document;
+    if (!state.openTabs.includes(document.id)) state.openTabs.push(document.id);
     state.pdfMode = document.extension === '.pdf' && page ? 'text' : 'preview';
     $('#readerEmpty').classList.add('hidden');
     $('#readerHeader').classList.remove('hidden');
     $('#readerContent').classList.remove('hidden');
+    renderReaderTabs();
     $('#readerName').textContent = document.name;
     $('#readerType').textContent = document.extension.slice(1, 5).toUpperCase();
     $('#readerMeta').textContent = `${formatBytes(document.size)}${document.pageCount ? ` · ${document.pageCount} 页` : ''}`;
@@ -197,7 +212,38 @@ async function openDocument(documentId, page = null) {
     $$('#pdfModeToggle button').forEach((button) => button.classList.toggle('active', button.dataset.mode === state.pdfMode));
     renderDocumentContent(page);
     renderDocuments();
+    renderScope();
   } catch (error) { showToast(friendlyError(error)); }
+}
+
+function renderReaderTabs() {
+  state.openTabs = state.openTabs.filter((id) => state.data.documents.some((document) => document.id === id));
+  const tabs = $('#readerTabs');
+  tabs.classList.toggle('hidden', state.openTabs.length === 0);
+  tabs.innerHTML = state.openTabs.map((documentId) => {
+    const document = state.data.documents.find((item) => item.id === documentId);
+    return `<button class="reader-tab ${state.currentDocument?.id === documentId ? 'active' : ''}" data-reader-tab="${documentId}">
+      <span>${escapeHtml(document.extension.slice(1, 4).toUpperCase())}</span>
+      <span class="tab-name">${escapeHtml(document.name)}</span>
+      <span class="tab-close" data-close-tab="${documentId}">×</span>
+    </button>`;
+  }).join('');
+  $$('[data-reader-tab]').forEach((tab) => tab.addEventListener('click', (event) => {
+    if (!event.target.closest('[data-close-tab]')) openDocument(tab.dataset.readerTab);
+  }));
+  $$('[data-close-tab]').forEach((button) => button.addEventListener('click', () => closeReaderTab(button.dataset.closeTab)));
+}
+
+async function closeReaderTab(documentId) {
+  const index = state.openTabs.indexOf(documentId);
+  state.openTabs = state.openTabs.filter((id) => id !== documentId);
+  if (state.currentDocument?.id === documentId) {
+    const nextId = state.openTabs[Math.min(index, state.openTabs.length - 1)];
+    if (nextId) await openDocument(nextId);
+    else resetReader();
+  }
+  renderReaderTabs();
+  renderScope();
 }
 
 function renderDocumentContent(page = null) {
@@ -256,6 +302,9 @@ function setQuote(text) {
 function renderScope() {
   if (!state.data) return;
   const chips = [];
+  if (state.includeCurrentPage && state.currentDocument) {
+    chips.push({ type: 'current-page', id: state.currentDocument.id, name: `当前页面 · ${state.currentDocument.name}`, icon: '◉' });
+  }
   for (const documentId of state.scopeDocumentIds) {
     const document = state.data.documents.find((item) => item.id === documentId);
     if (document) chips.push({ type: 'document', id: document.id, name: document.name, icon: '▧' });
@@ -265,7 +314,7 @@ function renderScope() {
     if (topic) chips.push({ type: 'topic', id: topic.id, name: topic.name, icon: '◇' });
   }
   $('#scopeChips').innerHTML = chips.length ? chips.map((chip) => `
-    <span class="scope-chip"><b>${chip.icon}</b><span>${escapeHtml(chip.name)}</span><button data-remove-scope="${chip.type}:${chip.id}">×</button></span>`).join('')
+    <span class="scope-chip ${chip.type === 'current-page' ? 'current-page' : ''}"><b>${chip.icon}</b><span>${escapeHtml(chip.name)}</span>${chip.type === 'current-page' ? '' : `<button data-remove-scope="${chip.type}:${chip.id}">×</button>`}</span>`).join('')
     : '<span class="scope-empty">未选择资料，将进行普通对话</span>';
   $$('[data-remove-scope]').forEach((button) => button.addEventListener('click', () => {
     const [type, id] = button.dataset.removeScope.split(':');
@@ -273,6 +322,7 @@ function renderScope() {
     else state.scopeTopicIds = state.scopeTopicIds.filter((item) => item !== id);
     renderScope();
   }));
+  $('#includeCurrentPageToggle').checked = state.includeCurrentPage;
   const remainingTopics = state.data.topics.filter((topic) => !state.scopeTopicIds.includes(topic.id));
   $('#scopeMenu').innerHTML = remainingTopics.length
     ? remainingTopics.map((topic) => `<button data-add-topic="${topic.id}">◇ ${escapeHtml(topic.name)}</button>`).join('')
@@ -317,7 +367,9 @@ async function sendMessage(prefill = null) {
       content,
       quote: state.currentQuote,
       documentIds: state.scopeDocumentIds,
-      topicIds: state.scopeTopicIds
+      topicIds: state.scopeTopicIds,
+      includeCurrentPage: state.includeCurrentPage,
+      currentDocumentId: state.currentDocument?.id || null
     });
     state.currentConversation = result.conversation;
     updateState(result.state);
@@ -383,6 +435,7 @@ function openSettings() {
   $('#apiKeyInput').value = '';
   $('#settingsHint').textContent = settings.hasApiKey ? '已保存 API Key。输入新值可替换。' : '尚未保存 API Key。';
   $('#dataRootText').textContent = state.data.dataRoot;
+  $('#librarySyncStatus').textContent = state.data.syncMode === 'icloud' ? '✓ 由 iCloud Drive 同步' : '当前为本地目录';
   $('#settingsModal').classList.remove('hidden');
 }
 
@@ -410,6 +463,10 @@ function renderHistory() {
       state.currentConversation = await window.knowledge.getConversation(button.dataset.openConversation);
       state.scopeDocumentIds = [...state.currentConversation.documentIds];
       state.scopeTopicIds = [...state.currentConversation.topicIds];
+      state.includeCurrentPage = state.currentConversation.includeCurrentPage !== false;
+      if (state.currentConversation.currentDocumentId && state.data.documents.some((item) => item.id === state.currentConversation.currentDocumentId)) {
+        await openDocument(state.currentConversation.currentDocumentId);
+      }
       renderScope();
       renderMessages();
       $('#historyModal').classList.add('hidden');
@@ -427,11 +484,51 @@ function renderHistory() {
 
 function startNewChat() {
   state.currentConversation = null;
-  state.scopeDocumentIds = state.currentDocument ? [state.currentDocument.id] : [];
+  state.scopeDocumentIds = [];
   state.scopeTopicIds = [];
   clearQuote();
   renderScope();
   $('#chatMessages').innerHTML = '<div class="chat-welcome"><span class="welcome-icon">✦</span><h2>开始一段新对话</h2><p>问答范围已经重置，可以继续选择资料或主题。</p></div>';
+}
+
+function resetLibraryView(nextState) {
+  state.data = nextState;
+  state.currentTopicId = null;
+  state.currentDocument = null;
+  state.currentConversation = null;
+  state.openTabs = [];
+  state.scopeDocumentIds = [];
+  state.scopeTopicIds = [];
+  state.currentQuote = null;
+  $('#searchInput').value = '';
+  $('#searchResults').classList.add('hidden');
+  $('#documentList').classList.remove('hidden');
+  resetReader();
+  updateState(nextState);
+  startNewChat();
+}
+
+async function changeLibraryRoot() {
+  try {
+    const selection = await window.knowledge.chooseLibraryRoot();
+    if (selection.canceled) return;
+    if (selection.isCurrent) { showToast('当前已经使用这个知识库目录'); return; }
+    let migrate = false;
+    if (selection.hasLibrary) {
+      if (!window.confirm('所选目录包含已有 KnowledgeMaster 知识库。切换并打开它？')) return;
+    } else {
+      const hasCurrentData = state.data.documents.length || state.data.topics.length || state.data.conversations.length;
+      if (hasCurrentData) {
+        migrate = window.confirm('是否复制当前全部资料、主题和对话到新目录？\n\n选择“取消”后还可以创建一个空知识库。');
+        if (!migrate && !window.confirm('不复制现有数据，直接在所选目录创建空知识库？旧知识库仍会保留。')) return;
+      }
+    }
+    const nextState = await window.knowledge.switchLibraryRoot(selection.path, migrate);
+    resetLibraryView(nextState);
+    $('#dataRootText').textContent = nextState.dataRoot;
+    $('#librarySyncStatus').textContent = nextState.syncMode === 'icloud' ? '✓ 由 iCloud Drive 同步' : '当前为本地目录';
+    showToast(nextState.syncMode === 'icloud' ? '已切换知识库，后续由 iCloud Drive 同步' : '知识库目录已切换', 4500);
+  } catch (error) { showToast(friendlyError(error), 5000); }
 }
 
 async function summarizeConversation() {
@@ -503,6 +600,10 @@ function bindEvents() {
     showToast('当前文档已加入问答范围');
   });
   $('#scopeMenuButton').addEventListener('click', () => $('#scopeMenu').classList.toggle('hidden'));
+  $('#includeCurrentPageToggle').addEventListener('change', (event) => {
+    state.includeCurrentPage = event.target.checked;
+    renderScope();
+  });
   $('#newChatButton').addEventListener('click', startNewChat);
   $('#sendButton').addEventListener('click', () => sendMessage());
   $('#chatInput').addEventListener('keydown', (event) => {
@@ -544,6 +645,7 @@ function bindEvents() {
   $('#openDataButton').addEventListener('click', async () => {
     try { await window.knowledge.openDataDirectory(); } catch (error) { showToast(friendlyError(error)); }
   });
+  $('#changeDataRootButton').addEventListener('click', changeLibraryRoot);
   $('#clearApiKeyButton').addEventListener('click', async () => {
     if (!state.data.settings.hasApiKey || !window.confirm('清除本机保存的 API Key？')) return;
     try {
@@ -571,7 +673,7 @@ function bindEvents() {
 async function initialize() {
   try {
     state.data = await window.knowledge.bootstrap();
-    $('#storageStatus').textContent = `${state.data.documents.length} 份资料 · 本地存储`;
+    renderStorageStatus();
     bindEvents();
     renderTopics();
     renderDocuments();

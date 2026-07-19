@@ -9,6 +9,7 @@ const { Store } = require('../src/main/store.cjs');
 const { queryTerms, scoreText, chunkText } = require('../src/main/search.cjs');
 const { htmlToText, safeHtml } = require('../src/main/extract.cjs');
 const { completionUrl } = require('../src/main/ai.cjs');
+const { AppConfig, isICloudPath } = require('../src/main/config.cjs');
 
 function temporaryDirectory() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'knowledge-organizer-'));
@@ -111,6 +112,34 @@ test('删除对话不会影响其他历史', () => {
   const second = store.createConversation({ title: '删除' });
   store.deleteConversation(second.id);
   assert.deepEqual(store.data.conversations.map((item) => item.id), [first.id]);
+});
+
+test('模型配置与知识库数据分开保存在本机设置中', () => {
+  const root = temporaryDirectory();
+  const configPath = path.join(root, 'config.json');
+  const config = new AppConfig(configPath, path.join(root, 'library'));
+  config.data.libraryRoot = path.join(root, 'iCloud-library');
+  config.data.apiKeyEncrypted = 'encrypted-value';
+  config.save();
+  const reloaded = new AppConfig(configPath, path.join(root, 'fallback'));
+  assert.equal(reloaded.data.libraryRoot, path.join(root, 'iCloud-library'));
+  assert.equal(reloaded.publicSettings().hasApiKey, true);
+  assert.equal(Object.hasOwn(new Store(path.join(root, 'library')).data, 'settings'), false);
+});
+
+test('识别 macOS iCloud Drive 知识库路径', () => {
+  assert.equal(isICloudPath('/Users/hank/Library/Mobile Documents/com~apple~CloudDocs/KnowledgeMaster'), true);
+  assert.equal(isICloudPath('/Users/hank/Documents/KnowledgeMaster'), false);
+});
+
+test('对话保存是否包含当前页面及当前标签文档', () => {
+  const store = new Store(temporaryDirectory());
+  const conversation = store.createConversation({ includeCurrentPage: false });
+  store.updateConversationScope(conversation.id, ['manual-document'], ['topic'], true, 'current-document');
+  const saved = store.conversation(conversation.id);
+  assert.equal(saved.includeCurrentPage, true);
+  assert.equal(saved.currentDocumentId, 'current-document');
+  assert.deepEqual(saved.documentIds, ['manual-document']);
 });
 
 test('渲染脚本引用的静态元素都存在于页面中', () => {

@@ -4,6 +4,7 @@ const { app, BrowserWindow, dialog, ipcMain, Menu, protocol, safeStorage, shell 
 const path = require('node:path');
 const fs = require('node:fs');
 const { Store, SUPPORTED_EXTENSIONS } = require('./store.cjs');
+const { AppConfig, isICloudPath } = require('./config.cjs');
 const { extractDocument } = require('./extract.cjs');
 const { chatCompletion } = require('./ai.cjs');
 
@@ -12,6 +13,7 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 let store;
+let appConfig;
 
 app.setName('KnowledgeMaster');
 
@@ -48,7 +50,7 @@ async function importPaths(inputPaths) {
 }
 
 function apiKey() {
-  const encrypted = store.data.settings.apiKeyEncrypted;
+  const encrypted = appConfig.data.apiKeyEncrypted;
   if (!encrypted) return '';
   try {
     const buffer = Buffer.from(encrypted, 'base64');
@@ -62,15 +64,53 @@ function apiKey() {
 
 function modelSettings(overrides = {}) {
   return {
-    provider: overrides.provider || store.data.settings.provider,
-    baseUrl: overrides.baseUrl || store.data.settings.baseUrl,
-    model: overrides.model || store.data.settings.model,
+    provider: overrides.provider || appConfig.data.provider,
+    baseUrl: overrides.baseUrl || appConfig.data.baseUrl,
+    model: overrides.model || appConfig.data.model,
     apiKey: overrides.apiKey || apiKey()
   };
 }
 
+function migrateLegacySettings() {
+  const legacy = store.data.settings;
+  if (!legacy) return;
+  if (!appConfig.data.apiKeyEncrypted && legacy.apiKeyEncrypted) appConfig.data.apiKeyEncrypted = legacy.apiKeyEncrypted;
+  for (const field of ['provider', 'baseUrl', 'model']) {
+    if (legacy[field]) appConfig.data[field] = legacy[field];
+  }
+  appConfig.save();
+  delete store.data.settings;
+  store.save();
+  store.save();
+}
+
+function publicState() {
+  return {
+    ...store.publicState(),
+    settings: appConfig.publicSettings(),
+    dataRoot: store.root,
+    syncMode: isICloudPath(store.root) ? 'icloud' : 'local'
+  };
+}
+
+function copyLibrary(sourceRoot, targetRoot) {
+  const source = path.resolve(sourceRoot);
+  const target = path.resolve(targetRoot);
+  if (target.startsWith(`${source}${path.sep}`) || source.startsWith(`${target}${path.sep}`)) {
+    throw new Error('新旧知识库目录不能互相嵌套');
+  }
+  fs.mkdirSync(targetRoot, { recursive: true });
+  for (const name of ['knowledge.json', 'knowledge.json.bak', 'source']) {
+    const source = path.join(sourceRoot, name);
+    const target = path.join(targetRoot, name);
+    if (!fs.existsSync(source)) continue;
+    if (fs.existsSync(target)) throw new Error(`目标目录已包含 ${name}，无法覆盖`);
+    fs.cpSync(source, target, { recursive: true, errorOnExist: true, force: false });
+  }
+}
+
 function registerIpc() {
-  ipcMain.handle('bootstrap', () => store.publicState());
+  ipcMain.handle('bootstrap', () => publicState());
 
   ipcMain.handle('documents:choose-files', async () => {
     const result = await dialog.showOpenDialog({
@@ -78,49 +118,49 @@ function registerIpc() {
       filters: [{ name: '支持的资料', extensions: ['pdf', 'html', 'htm', 'md', 'markdown', 'txt'] }]
     });
     if (result.canceled) return { canceled: true, results: [] };
-    return { canceled: false, results: await store.importFiles(result.filePaths, extractDocument), state: store.publicState() };
+    return { canceled: false, results: await store.importFiles(result.filePaths, extractDocument), state: publicState() };
   });
 
   ipcMain.handle('documents:choose-folder', async () => {
     const result = await dialog.showOpenDialog({ properties: ['openDirectory'] });
     if (result.canceled) return { canceled: true, results: [] };
     const files = listFilesRecursively(result.filePaths[0]);
-    return { canceled: false, results: await store.importFiles(files, extractDocument), state: store.publicState() };
+    return { canceled: false, results: await store.importFiles(files, extractDocument), state: publicState() };
   });
 
   ipcMain.handle('documents:import-paths', async (_, paths) => ({
     canceled: false,
     results: await importPaths(paths),
-    state: store.publicState()
+    state: publicState()
   }));
 
   ipcMain.handle('documents:get', (_, id) => store.documentContent(id));
-  ipcMain.handle('documents:delete', (_, id) => { store.deleteDocument(id); return store.publicState(); });
+  ipcMain.handle('documents:delete', (_, id) => { store.deleteDocument(id); return publicState(); });
   ipcMain.handle('documents:search', (_, { query, topicId }) => store.search(query, topicId));
-  ipcMain.handle('topics:create', (_, { name, parentId }) => ({ topic: store.createTopic(name, parentId), state: store.publicState() }));
-  ipcMain.handle('topics:rename', (_, { id, name }) => ({ topic: store.renameTopic(id, name), state: store.publicState() }));
-  ipcMain.handle('topics:delete', (_, id) => { store.deleteTopic(id); return store.publicState(); });
-  ipcMain.handle('topics:link', (_, { documentId, topicId }) => ({ added: store.linkDocument(documentId, topicId), state: store.publicState() }));
-  ipcMain.handle('topics:unlink', (_, { documentId, topicId }) => { store.unlinkDocument(documentId, topicId); return store.publicState(); });
+  ipcMain.handle('topics:create', (_, { name, parentId }) => ({ topic: store.createTopic(name, parentId), state: publicState() }));
+  ipcMain.handle('topics:rename', (_, { id, name }) => ({ topic: store.renameTopic(id, name), state: publicState() }));
+  ipcMain.handle('topics:delete', (_, id) => { store.deleteTopic(id); return publicState(); });
+  ipcMain.handle('topics:link', (_, { documentId, topicId }) => ({ added: store.linkDocument(documentId, topicId), state: publicState() }));
+  ipcMain.handle('topics:unlink', (_, { documentId, topicId }) => { store.unlinkDocument(documentId, topicId); return publicState(); });
 
   ipcMain.handle('settings:save', (_, settings) => {
-    store.data.settings.provider = settings.provider;
-    store.data.settings.baseUrl = String(settings.baseUrl || '').replace(/\/+$/, '');
-    store.data.settings.model = settings.model;
+    appConfig.data.provider = settings.provider;
+    appConfig.data.baseUrl = String(settings.baseUrl || '').replace(/\/+$/, '');
+    appConfig.data.model = settings.model;
     if (settings.apiKey) {
       const encrypted = safeStorage.isEncryptionAvailable()
         ? safeStorage.encryptString(settings.apiKey)
         : Buffer.from(settings.apiKey, 'utf8');
-      store.data.settings.apiKeyEncrypted = encrypted.toString('base64');
+      appConfig.data.apiKeyEncrypted = encrypted.toString('base64');
     }
-    store.save();
-    return store.publicState().settings;
+    appConfig.save();
+    return appConfig.publicSettings();
   });
 
   ipcMain.handle('settings:clear-key', () => {
-    store.data.settings.apiKeyEncrypted = '';
-    store.save();
-    return store.publicState().settings;
+    appConfig.data.apiKeyEncrypted = '';
+    appConfig.save();
+    return appConfig.publicSettings();
   });
 
   ipcMain.handle('settings:test', async (_, settings) => {
@@ -134,17 +174,58 @@ function registerIpc() {
     return store.root;
   });
 
+  ipcMain.handle('library:choose-root', async () => {
+    const result = await dialog.showOpenDialog({
+      title: '选择 KnowledgeMaster 知识库目录',
+      defaultPath: store.root,
+      properties: ['openDirectory', 'createDirectory']
+    });
+    if (result.canceled) return { canceled: true };
+    const selectedPath = path.resolve(result.filePaths[0]);
+    return {
+      canceled: false,
+      path: selectedPath,
+      isCurrent: selectedPath === path.resolve(store.root),
+      hasLibrary: fs.existsSync(path.join(selectedPath, 'knowledge.json')),
+      isICloud: isICloudPath(selectedPath)
+    };
+  });
+
+  ipcMain.handle('library:switch-root', (_, { targetPath, migrate }) => {
+    const targetRoot = path.resolve(targetPath);
+    if (targetRoot === path.resolve(store.root)) return publicState();
+    if (migrate) copyLibrary(store.root, targetRoot);
+    store = new Store(targetRoot);
+    appConfig.data.libraryRoot = targetRoot;
+    appConfig.save();
+    migrateLegacySettings();
+    return publicState();
+  });
+
   ipcMain.handle('conversations:get', (_, id) => store.conversation(id));
-  ipcMain.handle('conversations:delete', (_, id) => { store.deleteConversation(id); return store.publicState(); });
+  ipcMain.handle('conversations:delete', (_, id) => { store.deleteConversation(id); return publicState(); });
   ipcMain.handle('conversations:send', async (_, payload) => {
     let conversation = payload.conversationId
       ? store.conversation(payload.conversationId)
-      : store.createConversation({ documentIds: payload.documentIds, topicIds: payload.topicIds });
-    store.updateConversationScope(conversation.id, payload.documentIds || [], payload.topicIds || []);
+      : store.createConversation({
+        documentIds: payload.documentIds,
+        topicIds: payload.topicIds,
+        includeCurrentPage: payload.includeCurrentPage,
+        currentDocumentId: payload.currentDocumentId
+      });
+    store.updateConversationScope(
+      conversation.id,
+      payload.documentIds || [],
+      payload.topicIds || [],
+      payload.includeCurrentPage,
+      payload.currentDocumentId || null
+    );
     store.addMessage(conversation.id, { role: 'user', content: payload.content, quote: payload.quote || null });
     conversation = store.conversation(conversation.id);
     const retrievalQuery = `${payload.content}\n${payload.quote?.text || ''}`;
-    const context = store.contextFor(retrievalQuery, conversation.documentIds, conversation.topicIds);
+    const effectiveDocumentIds = [...conversation.documentIds];
+    if (conversation.includeCurrentPage && conversation.currentDocumentId) effectiveDocumentIds.push(conversation.currentDocumentId);
+    const context = store.contextFor(retrievalQuery, [...new Set(effectiveDocumentIds)], conversation.topicIds);
     const contextText = context.length
       ? context.map((item) => `[${item.label}：${item.documentName}${item.page ? `，第 ${item.page} 页` : ''}]\n${item.text}`).join('\n\n')
       : '（本次没有选择知识库资料，或所选资料尚未提取出正文。）';
@@ -162,7 +243,7 @@ function registerIpc() {
     ];
     const answer = await chatCompletion(modelSettings(), messages);
     store.addMessage(conversation.id, { role: 'assistant', content: answer, sources: context });
-    return { conversation: store.conversation(conversation.id), state: store.publicState() };
+    return { conversation: store.conversation(conversation.id), state: publicState() };
   });
 
   ipcMain.handle('conversations:summarize', async (_, conversationId) => {
@@ -173,7 +254,7 @@ function registerIpc() {
       { role: 'system', content: '请将对话提炼为简洁的中文知识摘要，分为：讨论主题、关键结论、待确认问题、后续行动。不要添加对话中没有的信息。' },
       { role: 'user', content: transcript }
     ]);
-    return { conversation: store.saveConversationSummary(conversationId, summary), state: store.publicState() };
+    return { conversation: store.saveConversationSummary(conversationId, summary), state: publicState() };
   });
 
   ipcMain.handle('topics:summarize', async (_, topicId) => {
@@ -189,7 +270,7 @@ function registerIpc() {
       { role: 'system', content: '请合并同一主题下的多次对话，输出可持续维护的中文主题摘要：核心认识、已确认结论、未解决问题、最近进展。严格忠于材料。' },
       { role: 'user', content: `主题：${topic.name}\n\n${material}` }
     ]);
-    return { summary: store.saveTopicSummary(topicId, summary), state: store.publicState() };
+    return { summary: store.saveTopicSummary(topicId, summary), state: publicState() };
   });
 }
 
@@ -257,7 +338,10 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  store = new Store(path.join(app.getPath('userData'), 'library'));
+  const userDataRoot = app.getPath('userData');
+  appConfig = new AppConfig(path.join(userDataRoot, 'config.json'), path.join(userDataRoot, 'library'));
+  store = new Store(appConfig.data.libraryRoot);
+  migrateLegacySettings();
   protocol.handle('appfile', (request) => {
     const url = new URL(request.url);
     const documentId = url.pathname.split('/').filter(Boolean)[0];

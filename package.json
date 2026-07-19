@@ -1,7 +1,7 @@
 {
   "name": "knowledge-master",
   "productName": "KnowledgeMaster",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "author": "hkcao",
   "description": "本地优先的 AI 知识整理桌面应用",
@@ -29,7 +29,10 @@
     ],
     "mac": {
       "category": "public.app-category.productivity",
-      "target": ["dmg", "zip"],
+      "target": [
+        "dmg",
+        "zip"
+      ],
       "artifactName": "${productName}-${version}-${arch}.${ext}"
     }
   }

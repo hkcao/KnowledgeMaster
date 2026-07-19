@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld('knowledge', {
   clearApiKey: () => ipcRenderer.invoke('settings:clear-key'),
   testSettings: (settings) => ipcRenderer.invoke('settings:test', settings),
   openDataDirectory: () => ipcRenderer.invoke('system:open-data-directory'),
+  chooseLibraryRoot: () => ipcRenderer.invoke('library:choose-root'),
+  switchLibraryRoot: (targetPath, migrate) => ipcRenderer.invoke('library:switch-root', { targetPath, migrate }),
   getConversation: (id) => ipcRenderer.invoke('conversations:get', id),
   deleteConversation: (id) => ipcRenderer.invoke('conversations:delete', id),
   sendMessage: (payload) => ipcRenderer.invoke('conversations:send', payload),

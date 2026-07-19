@@ -22,13 +22,7 @@ function defaultData() {
     topics: [],
     documentTopics: [],
     conversations: [],
-    topicSummaries: [],
-    settings: {
-      provider: 'deepseek',
-      baseUrl: 'https://api.deepseek.com',
-      model: 'deepseek-v4-flash',
-      apiKeyEncrypted: ''
-    }
+    topicSummaries: []
   };
 }
 
@@ -94,16 +88,12 @@ class Store {
         updatedAt: conversation.updatedAt,
         documentIds: conversation.documentIds,
         topicIds: conversation.topicIds,
+        includeCurrentPage: conversation.includeCurrentPage !== false,
+        currentDocumentId: conversation.currentDocumentId || null,
         summary: conversation.summary || '',
         messageCount: conversation.messages.length
       })),
       topicSummaries: this.data.topicSummaries,
-      settings: {
-        provider: this.data.settings.provider,
-        baseUrl: this.data.settings.baseUrl,
-        model: this.data.settings.model,
-        hasApiKey: Boolean(this.data.settings.apiKeyEncrypted)
-      },
       dataRoot: this.root,
       recoveryNotice: this.recoveryNotice
     };
@@ -190,6 +180,7 @@ class Store {
     this.data.documentTopics = this.data.documentTopics.filter((item) => item.documentId !== documentId);
     for (const conversation of this.data.conversations) {
       conversation.documentIds = conversation.documentIds.filter((id) => id !== documentId);
+      if (conversation.currentDocumentId === documentId) conversation.currentDocumentId = null;
     }
     const documentDirectory = path.dirname(document.storedPath);
     if (documentDirectory.startsWith(this.documentsRoot) && fs.existsSync(documentDirectory)) {
@@ -307,12 +298,14 @@ class Store {
     }));
   }
 
-  createConversation({ title, documentIds = [], topicIds = [] } = {}) {
+  createConversation({ title, documentIds = [], topicIds = [], includeCurrentPage = true, currentDocumentId = null } = {}) {
     const conversation = {
       id: id(),
       title: title || '新对话',
       documentIds: [...new Set(documentIds)],
       topicIds: [...new Set(topicIds)],
+      includeCurrentPage,
+      currentDocumentId,
       messages: [],
       summary: '',
       createdAt: now(),
@@ -340,10 +333,12 @@ class Store {
     return conversation;
   }
 
-  updateConversationScope(conversationId, documentIds, topicIds) {
+  updateConversationScope(conversationId, documentIds, topicIds, includeCurrentPage = true, currentDocumentId = null) {
     const conversation = this.conversation(conversationId);
     conversation.documentIds = [...new Set(documentIds)];
     conversation.topicIds = [...new Set(topicIds)];
+    conversation.includeCurrentPage = includeCurrentPage;
+    conversation.currentDocumentId = currentDocumentId;
     conversation.updatedAt = now();
     this.save();
   }

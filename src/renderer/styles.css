@@ -78,6 +78,12 @@ button { cursor: pointer; }
 .reader-title span:not(.file-type) { display: block; color: var(--muted); font-size: 10px; margin-top: 4px; }
 .file-type { padding: 6px; border-radius: 6px; background: #e7e2d8; color: #766851; font-size: 9px; font-weight: 800; }
 .reader-actions { display: flex; gap: 10px; align-items: center; }
+.reader-tabs { display: flex; flex: 0 0 38px; gap: 2px; overflow-x: auto; padding: 5px 10px 0; border-bottom: 1px solid var(--line); background: #ebe9e2; }
+.reader-tab { display: flex; align-items: center; gap: 7px; min-width: 110px; max-width: 210px; height: 32px; padding: 0 8px 0 10px; border: 0; border-radius: 8px 8px 0 0; background: transparent; color: var(--muted); font-size: 11px; }
+.reader-tab.active { background: var(--paper); color: var(--ink); }
+.reader-tab .tab-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.reader-tab .tab-close { border-radius: 4px; padding: 1px 3px; color: #989c95; }
+.reader-tab .tab-close:hover { background: rgba(0,0,0,.08); color: var(--ink); }
 .segmented { display: flex; padding: 3px; border-radius: 8px; background: #e8e6df; }
 .segmented button { border: 0; border-radius: 6px; padding: 5px 9px; background: transparent; color: var(--muted); font-size: 11px; }
 .segmented button.active { background: white; color: var(--ink); box-shadow: 0 1px 4px rgba(0,0,0,.08); }
@@ -109,6 +115,9 @@ button { cursor: pointer; }
 .scope-chip { display: flex; align-items: center; gap: 5px; max-width: 160px; padding: 4px 7px; border-radius: 6px; background: var(--green-soft); color: #315642; font-size: 10px; }
 .scope-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .scope-chip button { border: 0; padding: 0; background: transparent; color: inherit; }
+.scope-chip.current-page { background: #eee6d8; color: #715c3c; }
+.current-page-toggle { display: flex; align-items: center; gap: 6px; width: fit-content; margin-top: 7px; color: var(--muted); font-size: 10px; cursor: pointer; }
+.current-page-toggle input { accent-color: var(--green); }
 .scope-menu { position: absolute; z-index: 30; top: 38px; right: 12px; width: 220px; max-height: 260px; overflow: auto; padding: 6px; border: 1px solid var(--line); border-radius: 10px; background: white; box-shadow: var(--shadow); }
 .scope-menu button { display: block; width: 100%; border: 0; border-radius: 6px; padding: 8px; background: transparent; text-align: left; font-size: 12px; }
 .scope-menu button:hover { background: var(--green-soft); }
@@ -150,9 +159,13 @@ button { cursor: pointer; }
 .form-hint { min-height: 18px; margin: 0 18px; color: var(--muted); font-size: 10px; }
 .settings-modal footer { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 18px 18px; }
 .settings-data { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 15px 18px 0; padding: 12px; border-radius: 9px; background: var(--panel); }
-.settings-data strong, .settings-data span { display: block; }
+.settings-data strong, .settings-data > div > span, .settings-data small { display: block; }
 .settings-data strong { font-size: 11px; }
-.settings-data span { max-width: 280px; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 9px; }
+.settings-data > div { min-width: 0; }
+.settings-data > div > span { max-width: 245px; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 9px; }
+.settings-data small { margin-top: 4px; color: var(--green); font-size: 9px; }
+.settings-data-buttons { display: grid; gap: 5px; flex: 0 0 auto; }
+.settings-data-buttons button { padding: 6px 8px; font-size: 10px; }
 .danger-text-button { margin-right: auto; border: 0; background: transparent; color: #9b3e34; font-size: 11px; }
 .history-modal { width: 560px; }
 .history-list { max-height: 60vh; overflow: auto; padding: 8px; }

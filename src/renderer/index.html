@@ -65,6 +65,8 @@
           </div>
         </header>
 
+        <div id="readerTabs" class="reader-tabs hidden"></div>
+
         <div id="readerEmpty" class="empty-state">
           <div class="empty-illustration"><span>⌁</span></div>
           <h1>把资料放进来，开始整理</h1>
@@ -92,6 +94,10 @@
         <section class="scope-area">
           <div class="scope-title"><span>问答范围</span><button id="scopeMenuButton" class="text-button">＋ 添加主题</button></div>
           <div id="scopeChips" class="scope-chips"><span class="scope-empty">未选择资料，将进行普通对话</span></div>
+          <label class="current-page-toggle">
+            <input id="includeCurrentPageToggle" type="checkbox" checked />
+            <span>自动包含当前页面</span>
+          </label>
           <div id="scopeMenu" class="scope-menu hidden"></div>
         </section>
 
@@ -137,8 +143,11 @@
         <label>API Key<input id="apiKeyInput" type="password" autocomplete="off" placeholder="留空则保留已保存的 Key" /></label>
         <p id="settingsHint" class="form-hint"></p>
         <div class="settings-data">
-          <div><strong>本地知识库</strong><span id="dataRootText"></span></div>
-          <button id="openDataButton" class="secondary-button">在 Finder 中打开</button>
+          <div><strong>知识库与 source 目录</strong><span id="dataRootText"></span><small id="librarySyncStatus"></small></div>
+          <span class="settings-data-buttons">
+            <button id="changeDataRootButton" class="secondary-button">更改目录</button>
+            <button id="openDataButton" class="secondary-button">在 Finder 中打开</button>
+          </span>
         </div>
         <footer>
           <button id="clearApiKeyButton" class="danger-text-button">清除 API Key</button>
