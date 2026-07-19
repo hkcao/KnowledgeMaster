@@ -135,6 +135,9 @@ final class KnowledgeStoreTests: XCTestCase {
         XCTAssertTrue(claude.contains("default"))
         XCTAssertTrue(claude.contains(documents.path))
         XCTAssertTrue(claude.contains(cache.path))
+        XCTAssertTrue(claude.contains("stream-json"))
+        XCTAssertTrue(claude.contains("--verbose"))
+        XCTAssertTrue(claude.contains("--include-hook-events"))
         XCTAssertTrue(claude.contains("--no-session-persistence"))
         XCTAssertFalse(claude.contains("--disable-slash-commands"))
         XCTAssertFalse(claude.contains("--safe-mode"))
@@ -144,6 +147,7 @@ final class KnowledgeStoreTests: XCTestCase {
                                           documentsDirectory: documents, cacheDirectory: cache, answerURL: answer)
         XCTAssertTrue(codex.contains("workspace-write"))
         XCTAssertTrue(codex.contains("--ephemeral"))
+        XCTAssertTrue(codex.contains("--json"))
         XCTAssertFalse(codex.contains("--ignore-user-config"))
         XCTAssertFalse(codex.contains("--ignore-rules"))
         XCTAssertFalse(codex.contains("--dangerously-bypass-approvals-and-sandbox"))
@@ -242,10 +246,11 @@ final class KnowledgeStoreTests: XCTestCase {
 
     func testAppTerminationStopsRegisteredAgentProcesses() throws {
         let process = Process()
+        let runID = UUID()
         process.executableURL = URL(fileURLWithPath: "/bin/sleep")
         process.arguments = ["30"]
         try process.run()
-        AgentProcessRegistry.shared.register(process)
+        AgentProcessRegistry.shared.register(process, runID: runID)
         XCTAssertEqual(AgentProcessRegistry.shared.runningCount, 1)
 
         AgentProcessRegistry.shared.terminateAll()
@@ -254,12 +259,76 @@ final class KnowledgeStoreTests: XCTestCase {
         XCTAssertEqual(AgentProcessRegistry.shared.runningCount, 0)
     }
 
+    func testManualTerminationOnlyStopsTheSelectedAgentRun() throws {
+        let first = Process()
+        let second = Process()
+        let firstID = UUID()
+        let secondID = UUID()
+        for process in [first, second] {
+            process.executableURL = URL(fileURLWithPath: "/bin/sleep")
+            process.arguments = ["30"]
+            try process.run()
+        }
+        AgentProcessRegistry.shared.register(first, runID: firstID)
+        AgentProcessRegistry.shared.register(second, runID: secondID)
+
+        AgentProcessRegistry.shared.terminate(runID: firstID)
+        first.waitUntilExit()
+
+        XCTAssertFalse(first.isRunning)
+        XCTAssertTrue(second.isRunning)
+        XCTAssertTrue(AgentProcessRegistry.shared.wasCancelled(runID: firstID))
+        AgentProcessRegistry.shared.terminateAll()
+        second.waitUntilExit()
+    }
+
+    func testCodexStreamParserShowsToolsButFiltersReasoning() {
+        let reasoning = AgentStreamParser.parse(
+            line: #"{"type":"item.completed","item":{"type":"reasoning","text":"hidden"}}"#,
+            backend: .codex
+        )
+        let command = AgentStreamParser.parse(
+            line: #"{"type":"item.started","item":{"type":"command_execution","command":"pdftotext ../documents/a.pdf -"}}"#,
+            backend: .codex
+        )
+
+        XCTAssertTrue(reasoning.events.isEmpty)
+        XCTAssertEqual(command.events.first?.kind, .tool)
+        XCTAssertEqual(command.events.first?.title, "正在执行命令")
+        XCTAssertTrue(command.events.first?.detail?.contains("pdftotext") == true)
+    }
+
+    func testClaudeStreamParserExtractsToolProgressAndFinalAnswerIncrementally() {
+        var parser = AgentStreamParser(backend: .claudeCode, workspacePath: "/tmp/KnowledgeMasterAgent-123")
+        let tool = #"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Skill","input":{"skill":"pdf"}}]}}"# + "\n"
+        let result = #"{"type":"result","is_error":false,"num_turns":3,"duration_ms":4200,"result":"最终回答"}"# + "\n"
+        let combined = Data((tool + result).utf8)
+        let split = combined.count / 2
+
+        let firstEvents = parser.consume(combined.prefix(split))
+        let secondEvents = parser.consume(combined.suffix(from: split))
+
+        XCTAssertEqual((firstEvents + secondEvents).first(where: { $0.title == "正在调用 Skill" })?.detail, "pdf")
+        XCTAssertEqual((firstEvents + secondEvents).last?.kind, .completed)
+        XCTAssertEqual(parser.finalAnswer, "最终回答")
+    }
+
     func testOldChatMessageWithoutBackendRemainsCompatible() throws {
         let id = UUID()
         let data = #"{"id":"\#(id.uuidString)","role":"assistant","content":"ok","createdAt":0}"#.data(using: .utf8)!
         let message = try JSONDecoder().decode(ChatMessage.self, from: data)
         XCTAssertNil(message.backend)
         XCTAssertNil(message.generatedFiles)
+        XCTAssertNil(message.traceEvents)
+    }
+
+    func testAgentTraceEventsRoundTripInConversationHistory() throws {
+        let message = ChatMessage(role: "assistant", content: "完成", backend: ChatBackend.codex.rawValue,
+                                  traceEvents: [AgentTraceEvent(kind: .tool, title: "正在读取文件", detail: "a.pdf")])
+        let decoded = try JSONDecoder().decode(ChatMessage.self, from: JSONEncoder().encode(message))
+
+        XCTAssertEqual(decoded.traceEvents?.first?.title, "正在读取文件")
+        XCTAssertEqual(decoded.traceEvents?.first?.detail, "a.pdf")
     }
 
     func testKnowledgeFileToolsCanSearchReadAndWriteGeneratedFiles() throws {

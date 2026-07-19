@@ -6,6 +6,8 @@ struct SettingsView: View {
     @State private var apiKey = ""
     @State private var status = ""
     @State private var agentStatus = ""
+    @State private var agentTestRunID: UUID?
+    @State private var agentTestBackend: ChatBackend?
 
     var body: some View {
         Form {
@@ -23,12 +25,19 @@ struct SettingsView: View {
                             .foregroundStyle(AgentRunner.executableURL(for: backend) == nil ? Color.red : Color.secondary)
                             .textSelection(.enabled)
                         Spacer()
-                        Button("测试") { Task { await testAgent(backend) } }
-                            .disabled(AgentRunner.executableURL(for: backend) == nil)
+                        if agentTestBackend == backend, let runID = agentTestRunID {
+                            Button("停止", role: .destructive) {
+                                AgentProcessRegistry.shared.terminate(runID: runID)
+                                agentStatus = "正在停止 \(backend.name)…"
+                            }
+                        } else {
+                            Button("测试") { Task { await testAgent(backend) } }
+                                .disabled(AgentRunner.executableURL(for: backend) == nil || agentTestRunID != nil)
+                        }
                     }
                 }
                 if !agentStatus.isEmpty { Text(agentStatus).font(.caption).foregroundStyle(.secondary) }
-                Text("Agent 模式只会收到本轮选中文档的临时文本副本；Claude Code 仅开放只读搜索工具，Codex 使用只读临时沙箱。登录和订阅由对应 CLI 管理。")
+                Text("Agent 模式只会收到本轮选中原格式文件的独立临时副本；执行过程可实时展开查看并手动停止。登录和订阅由对应 CLI 管理。")
                     .font(.caption).foregroundStyle(.secondary)
                 DisclosureGroup("Claude Code / Codex 接入步骤") {
                     VStack(alignment: .leading, spacing: 8) {
@@ -92,14 +101,24 @@ struct SettingsView: View {
         } catch { status = error.localizedDescription }
     }
     private func testAgent(_ backend: ChatBackend) async {
+        let runID = UUID()
+        agentTestRunID = runID
+        agentTestBackend = backend
         agentStatus = "正在测试 \(backend.name)…"
         do {
             let answer = try await AgentRunner.answer(backend: backend, request: AgentRunRequest(
                 question: "只回复：Agent 连接成功",
                 quote: nil, history: [], documents: [], annotations: []
-            )).answer
+            ), runID: runID) { event in
+                agentStatus = "\(backend.name)：\(event.title)"
+            }.answer
             agentStatus = "\(backend.name)：\(answer)"
-        } catch { agentStatus = error.localizedDescription }
+        } catch {
+            if case AgentRunnerError.cancelled = error { agentStatus = "已停止 \(backend.name) 测试" }
+            else { agentStatus = error.localizedDescription }
+        }
+        agentTestRunID = nil
+        agentTestBackend = nil
     }
     private func chooseRoot() {
         let panel = NSOpenPanel()

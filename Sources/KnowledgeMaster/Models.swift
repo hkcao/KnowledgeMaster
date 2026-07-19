@@ -210,6 +210,31 @@ enum KnowledgeAnnotationReference {
     }
 }
 
+enum AgentTraceKind: String, Codable, Hashable {
+    case status
+    case tool
+    case file
+    case warning
+    case error
+    case completed
+}
+
+struct AgentTraceEvent: Codable, Identifiable, Hashable {
+    var id: UUID
+    var kind: AgentTraceKind
+    var title: String
+    var detail: String?
+    var createdAt: Date
+
+    init(id: UUID = UUID(), kind: AgentTraceKind, title: String, detail: String? = nil, createdAt: Date = Date()) {
+        self.id = id
+        self.kind = kind
+        self.title = title
+        self.detail = detail
+        self.createdAt = createdAt
+    }
+}
+
 struct ChatMessage: Codable, Identifiable, Hashable {
     var id: UUID
     var role: String
@@ -218,10 +243,12 @@ struct ChatMessage: Codable, Identifiable, Hashable {
     var sources: [ContextChunk]?
     var backend: String?
     var generatedFiles: [String]?
+    var traceEvents: [AgentTraceEvent]?
     var createdAt: Date
 
     init(id: UUID = UUID(), role: String, content: String, quote: ReaderQuote? = nil,
          sources: [ContextChunk]? = nil, backend: String? = nil, generatedFiles: [String]? = nil,
+         traceEvents: [AgentTraceEvent]? = nil,
          createdAt: Date = Date()) {
         self.id = id
         self.role = role
@@ -230,6 +257,7 @@ struct ChatMessage: Codable, Identifiable, Hashable {
         self.sources = sources
         self.backend = backend
         self.generatedFiles = generatedFiles
+        self.traceEvents = traceEvents
         self.createdAt = createdAt
     }
 }
@@ -324,6 +352,7 @@ struct AgentRunRequest: Hashable {
 struct AgentRunResult: Hashable {
     var answer: String
     var generatedFiles: [String]
+    var traceEvents: [AgentTraceEvent]
 }
 
 struct ReaderSelection: Hashable {

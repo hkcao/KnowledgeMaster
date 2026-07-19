@@ -27,15 +27,18 @@ struct ChatView: View {
     @State private var error: String?
     @State private var showHistory = false
     @State private var showSummary = false
+    @State private var activeTraceEvents: [AgentTraceEvent] = []
+    @State private var activeAgentRunID: UUID?
+    @State private var activeAgentBackend: ChatBackend?
 
     var body: some View {
         VStack(spacing: 0) {
             HStack {
                 Label("知识问答", systemImage: "sparkles").font(.headline)
                 Spacer()
-                Button { Task { await summarizeConversation() } } label: { Image(systemName: "text.quote") }.help("提炼对话摘要").disabled(conversation.messages.isEmpty)
+                Button { Task { await summarizeConversation() } } label: { Image(systemName: "text.quote") }.help("提炼对话摘要").disabled(conversation.messages.isEmpty || sending)
                 Button { showHistory = true } label: { Image(systemName: "clock.arrow.circlepath") }.help("对话历史")
-                Button { newChat() } label: { Image(systemName: "plus") }.help("新对话")
+                Button { newChat() } label: { Image(systemName: "plus") }.help("新对话").disabled(sending)
             }.padding(14).frame(height: 58)
             Divider()
             scope
@@ -48,11 +51,30 @@ struct ChatView: View {
                                                    description: Text("选择当前文档、文件或主题作为问答范围。"))
                         }
                         ForEach(conversation.messages) { message in messageView(message).id(message.id) }
-                        if sending { ProgressView(settings.chatBackend == .direct ? "正在检索并回答…" : "正在由 \(settings.chatBackend.name) 检索资料…").frame(maxWidth: .infinity, alignment: .leading) }
+                        if !activeTraceEvents.isEmpty {
+                            AgentTraceDisclosure(events: activeTraceEvents,
+                                                 isRunning: sending && activeAgentRunID != nil,
+                                                 initiallyExpanded: true)
+                                .id("active-agent-trace")
+                        }
+                        if sending {
+                            HStack {
+                                ProgressView(activeAgentBackend.map { "正在由 \($0.name) 处理资料…" } ?? "正在检索并回答…")
+                                Spacer()
+                                if activeAgentRunID != nil {
+                                    Button(role: .destructive) { stopAgent() } label: {
+                                        Label("停止", systemImage: "stop.circle")
+                                    }.buttonStyle(.borderless)
+                                }
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }.padding(12)
                 }
                 .background(Color(nsColor: .windowBackgroundColor))
                 .onChange(of: conversation.messages.count) { _, _ in if let last = conversation.messages.last { proxy.scrollTo(last.id, anchor: .bottom) } }
+                .onChange(of: activeTraceEvents.count) { _, _ in
+                    if !activeTraceEvents.isEmpty { proxy.scrollTo("active-agent-trace", anchor: .bottom) }
+                }
             }
             Divider()
             if let quote {
@@ -175,6 +197,9 @@ struct ChatView: View {
                     }
                 }
             }
+            if let traceEvents = message.traceEvents, !traceEvents.isEmpty {
+                AgentTraceDisclosure(events: traceEvents, isRunning: false, initiallyExpanded: false)
+            }
     }.frame(maxWidth: .infinity, alignment: message.role == "user" ? .trailing : .leading)
     }
 
@@ -194,6 +219,18 @@ struct ChatView: View {
 
     private func newChat() {
         conversation = Conversation(); selectedDocumentIDs = []; selectedTopicIDs = []; quote = nil; draft = ""; error = nil
+        activeTraceEvents = []; activeAgentRunID = nil; activeAgentBackend = nil
+    }
+
+    @MainActor private func appendTrace(_ event: AgentTraceEvent) {
+        if activeTraceEvents.count >= 200 { activeTraceEvents.removeFirst(activeTraceEvents.count - 199) }
+        activeTraceEvents.append(event)
+    }
+
+    @MainActor private func stopAgent() {
+        guard let runID = activeAgentRunID else { return }
+        AgentProcessRegistry.shared.terminate(runID: runID)
+        appendTrace(AgentTraceEvent(kind: .warning, title: "正在停止 \(activeAgentBackend?.name ?? "Agent")"))
     }
 
     private var historySheet: some View {
@@ -235,6 +272,9 @@ struct ChatView: View {
     @MainActor private func summarizeConversation() async {
         guard !conversation.messages.isEmpty else { return }
         sending = true; error = nil
+        activeTraceEvents = []
+        activeAgentRunID = nil
+        activeAgentBackend = settings.chatBackend == .direct ? nil : settings.chatBackend
         let transcript = conversation.messages.map { "\($0.role == "user" ? "用户" : "AI")：\($0.content)" }.joined(separator: "\n\n")
         do {
             if settings.chatBackend == .direct {
@@ -243,13 +283,21 @@ struct ChatView: View {
                     .init(role: "user", content: String(transcript.suffix(30_000)))
                 ])
             } else {
+                let runID = UUID()
+                activeTraceEvents = []
+                activeAgentRunID = runID
+                activeAgentBackend = settings.chatBackend
                 conversation.summary = try await AgentRunner.answer(backend: settings.chatBackend, request: AgentRunRequest(
                     question: "将以上对话提炼为中文摘要：讨论主题、关键结论、待确认问题、后续行动。不要添加对话中没有的信息。",
                     quote: nil, history: Array(conversation.messages.suffix(30)), documents: [], annotations: []
-                )).answer
+                ), runID: runID, onProgress: appendTrace).answer
             }
             conversation.updatedAt = Date(); store.saveConversation(conversation); showSummary = true
-        } catch { self.error = error.localizedDescription }
+        } catch {
+            if case AgentRunnerError.cancelled = error { self.error = nil }
+            else { self.error = error.localizedDescription }
+        }
+        activeAgentRunID = nil
         sending = false
     }
 
@@ -263,6 +311,9 @@ struct ChatView: View {
         let currentIDs = includeCurrent ? [currentDocument?.id].compactMap { $0 } : []
         let documentIDs = Array(Set(Array(selectedDocumentIDs) + currentIDs))
         let backend = settings.chatBackend
+        activeTraceEvents = []
+        activeAgentRunID = nil
+        activeAgentBackend = backend == .direct ? nil : backend
         let usesFragmentContext = backend == .direct && settings.apiContextMode == .relevantFragments
         let context = usesFragmentContext
             ? store.context(query: question + "\n" + (quote?.text ?? ""), documentIDs: documentIDs, topicIDs: Array(selectedTopicIDs))
@@ -281,6 +332,7 @@ struct ChatView: View {
         do {
             let answer: String
             var generatedFiles: [String] = []
+            var traceEvents: [AgentTraceEvent] = []
             if backend == .direct {
                 if settings.apiContextMode == .relevantFragments {
                     let messages = [AIClient.Message(
@@ -313,15 +365,18 @@ struct ChatView: View {
                 }
             } else {
                 let sourceDocuments = store.agentSourceDocuments(documentIDs: documentIDs, topicIDs: Array(selectedTopicIDs))
+                let runID = UUID()
+                activeAgentRunID = runID
                 let result = try await AgentRunner.answer(backend: backend, request: AgentRunRequest(
                     question: question,
                     quote: quote,
                     history: Array(conversation.messages.dropLast().suffix(12)),
                     documents: sourceDocuments,
                     annotations: annotations
-                ))
+                ), runID: runID, onProgress: appendTrace)
                 answer = result.answer
                 generatedFiles = result.generatedFiles
+                traceEvents = result.traceEvents
             }
             let annotationSources = annotations.enumerated().compactMap { index, annotation -> ContextChunk? in
                 guard let document = store.data.documents.first(where: { $0.id == annotation.documentId }) else { return nil }
@@ -335,13 +390,20 @@ struct ChatView: View {
             }
             conversation.messages.append(ChatMessage(role: "assistant", content: answer, sources: documentSources + annotationSources,
                                                      backend: backend.rawValue,
-                                                     generatedFiles: generatedFiles.isEmpty ? nil : generatedFiles))
+                                                     generatedFiles: generatedFiles.isEmpty ? nil : generatedFiles,
+                                                     traceEvents: traceEvents.isEmpty ? nil : traceEvents))
             conversation.documentIds = Array(selectedDocumentIDs); conversation.topicIds = Array(selectedTopicIDs)
             conversation.includeCurrentPage = includeCurrent; conversation.includeAnnotations = includeAnnotations
             conversation.currentDocumentId = currentDocument?.id; conversation.updatedAt = Date()
             store.saveConversation(conversation)
             quote = nil
-        } catch { self.error = error.localizedDescription }
+            activeTraceEvents = []
+            activeAgentBackend = nil
+        } catch {
+            if case AgentRunnerError.cancelled = error { self.error = nil }
+            else { self.error = error.localizedDescription }
+        }
+        activeAgentRunID = nil
         sending = false
     }
 }

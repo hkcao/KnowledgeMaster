@@ -3,28 +3,48 @@ import Foundation
 @MainActor
 final class AgentProcessRegistry {
     static let shared = AgentProcessRegistry()
-    private var processes: [ObjectIdentifier: Process] = [:]
+    private var processes: [UUID: Process] = [:]
+    private var cancelledRuns: Set<UUID> = []
 
     var runningCount: Int { processes.values.filter(\.isRunning).count }
 
-    func register(_ process: Process) {
-        processes[ObjectIdentifier(process)] = process
+    func register(_ process: Process, runID: UUID) {
+        processes[runID] = process
     }
 
-    func unregister(_ process: Process) {
-        processes.removeValue(forKey: ObjectIdentifier(process))
+    func unregister(runID: UUID) {
+        processes.removeValue(forKey: runID)
+        cancelledRuns.remove(runID)
+    }
+
+    func terminate(runID: UUID) {
+        guard let process = processes[runID], process.isRunning else { return }
+        cancelledRuns.insert(runID)
+        process.terminate()
+    }
+
+    func wasCancelled(runID: UUID) -> Bool {
+        cancelledRuns.contains(runID)
     }
 
     func terminateAll() {
-        let running = processes.values.filter(\.isRunning)
+        let running = processes.filter { $0.value.isRunning }
         processes.removeAll()
-        for process in running { process.terminate() }
+        cancelledRuns.formUnion(running.map(\.key))
+        for (_, process) in running { process.terminate() }
+    }
+}
+
+private final class AgentTraceCollector {
+    private(set) var events: [AgentTraceEvent] = []
+
+    func append(_ event: AgentTraceEvent) {
+        if events.count >= 200 { events.removeFirst(events.count - 199) }
+        events.append(event)
     }
 }
 
 enum AgentRunner {
-    static let timeoutSeconds: TimeInterval = 180
-
     static func executableURL(for backend: ChatBackend, environment: [String: String] = ProcessInfo.processInfo.environment) -> URL? {
         guard backend != .direct else { return nil }
         let name = backend == .claudeCode ? "claude" : "codex"
@@ -62,7 +82,7 @@ enum AgentRunner {
             return []
         case .claudeCode:
             return [
-                "-p", "--output-format", "text",
+                "-p", "--output-format", "stream-json", "--verbose", "--include-hook-events",
                 "--permission-mode", "auto",
                 "--tools", "default",
                 "--add-dir", documentsDirectory.path, cacheDirectory.path,
@@ -76,6 +96,7 @@ enum AgentRunner {
                 "--ephemeral",
                 "--skip-git-repo-check",
                 "--color", "never",
+                "--json",
                 "--output-last-message", answerURL.path,
                 "-"
             ]
@@ -125,9 +146,17 @@ enum AgentRunner {
         """
     }
 
-    static func answer(backend: ChatBackend, request: AgentRunRequest) async throws -> AgentRunResult {
+    static func answer(backend: ChatBackend, request: AgentRunRequest, runID: UUID = UUID(),
+                       onProgress: @escaping @MainActor (AgentTraceEvent) -> Void = { _ in }) async throws -> AgentRunResult {
         guard backend != .direct else { throw AgentRunnerError.unsupportedBackend }
         guard let executable = executableURL(for: backend) else { throw AgentRunnerError.notInstalled(backend.name) }
+        let trace = AgentTraceCollector()
+        func publish(_ events: [AgentTraceEvent]) async {
+            for event in events {
+                trace.append(event)
+                await onProgress(event)
+            }
+        }
 
         let manager = FileManager.default
         let workspace = manager.temporaryDirectory.appendingPathComponent("KnowledgeMasterAgent-\(UUID().uuidString)", isDirectory: true)
@@ -147,6 +176,11 @@ enum AgentRunner {
 
         let documentFiles = try stageOriginalDocuments(request.documents, documentsDirectory: documentsDirectory,
                                                        cacheDirectory: cacheDirectory, manager: manager)
+        let cachedCount = documentFiles.filter(\.3).count
+        let preparationDetail = cachedCount > 0
+            ? "\(documentFiles.count) 份原始资料 · \(cachedCount) 份已有解析缓存"
+            : "\(documentFiles.count) 份原始资料"
+        await publish([AgentTraceEvent(kind: .status, title: "已准备只读资料副本", detail: preparationDetail)])
         let prompt = prompt(for: request, documentFiles: documentFiles)
         try prompt.write(to: promptURL, atomically: true, encoding: .utf8)
         manager.createFile(atPath: stdoutURL.path, contents: nil)
@@ -161,6 +195,7 @@ enum AgentRunner {
         let input = try FileHandle(forReadingFrom: promptURL)
         let output = try FileHandle(forWritingTo: stdoutURL)
         let errorOutput = try FileHandle(forWritingTo: stderrURL)
+        let outputReader = try FileHandle(forReadingFrom: stdoutURL)
         process.standardInput = input
         process.standardOutput = output
         process.standardError = errorOutput
@@ -168,41 +203,66 @@ enum AgentRunner {
             try? input.close()
             try? output.close()
             try? errorOutput.close()
+            try? outputReader.close()
         }
 
         do { try process.run() }
-        catch { throw AgentRunnerError.launchFailed(backend.name, error.localizedDescription) }
-        await MainActor.run { AgentProcessRegistry.shared.register(process) }
-        defer { Task { @MainActor in AgentProcessRegistry.shared.unregister(process) } }
+        catch {
+            await publish([AgentTraceEvent(kind: .error, title: "无法启动 \(backend.name)", detail: error.localizedDescription)])
+            throw AgentRunnerError.launchFailed(backend.name, error.localizedDescription)
+        }
+        await publish([AgentTraceEvent(kind: .status, title: "已启动 \(backend.name)", detail: "等待 Agent 读取资料并调用工具")])
+        await MainActor.run { AgentProcessRegistry.shared.register(process, runID: runID) }
+        defer { Task { @MainActor in AgentProcessRegistry.shared.unregister(runID: runID) } }
 
-        let startedAt = Date()
-        while process.isRunning && Date().timeIntervalSince(startedAt) < timeoutSeconds {
+        var parser = AgentStreamParser(backend: backend, workspacePath: workspace.path)
+        while process.isRunning {
+            if let data = try? outputReader.read(upToCount: 64 * 1_024), !data.isEmpty {
+                await publish(parser.consume(data))
+            }
             do { try await Task.sleep(for: .milliseconds(120)) }
             catch {
                 if process.isRunning { process.terminate(); process.waitUntilExit() }
+                await publish([AgentTraceEvent(kind: .warning, title: "Agent 执行已取消")])
                 throw error
             }
-        }
-        if process.isRunning {
-            process.terminate()
-            process.waitUntilExit()
-            throw AgentRunnerError.timeout(backend.name)
         }
         process.waitUntilExit()
         try? output.synchronize()
         try? errorOutput.synchronize()
+        while let data = try? outputReader.read(upToCount: 64 * 1_024), !data.isEmpty {
+            await publish(parser.consume(data))
+        }
+        await publish(parser.finish())
 
         let stdout = (try? String(contentsOf: stdoutURL, encoding: .utf8)) ?? ""
         let stderr = (try? String(contentsOf: stderrURL, encoding: .utf8)) ?? ""
+        let wasCancelled = await MainActor.run { AgentProcessRegistry.shared.wasCancelled(runID: runID) }
+        if wasCancelled {
+            await publish([AgentTraceEvent(kind: .warning, title: "已由用户停止 \(backend.name)")])
+            throw AgentRunnerError.cancelled(backend.name)
+        }
         guard process.terminationStatus == 0 else {
             let detail = String((stderr.isEmpty ? stdout : stderr).suffix(4_000))
+            await publish([AgentTraceEvent(kind: .error, title: "\(backend.name) 执行失败",
+                                           detail: detail.isEmpty ? "进程退出码 \(process.terminationStatus)" : String(detail.suffix(600)))])
             throw AgentRunnerError.failed(backend.name, detail.isEmpty ? "进程退出码 \(process.terminationStatus)" : detail)
         }
-        let answer = ((try? String(contentsOf: answerURL, encoding: .utf8)) ?? stdout)
+        let answerFile = (try? String(contentsOf: answerURL, encoding: .utf8))?
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        let answer = [answerFile, parser.finalAnswer]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty } ?? ""
         guard !answer.isEmpty else { throw AgentRunnerError.emptyResponse(backend.name) }
         let generatedFiles = try syncGeneratedFiles(from: generatedDirectory, documents: request.documents, manager: manager)
-        return AgentRunResult(answer: answer, generatedFiles: generatedFiles)
+        if !generatedFiles.isEmpty {
+            await publish([AgentTraceEvent(kind: .file, title: "已保存可复用解析缓存",
+                                           detail: "\(generatedFiles.count) 个文件")])
+        }
+        if trace.events.last?.kind != .completed {
+            await publish([AgentTraceEvent(kind: .completed, title: "\(backend.name) 执行完成")])
+        }
+        return AgentRunResult(answer: answer, generatedFiles: generatedFiles, traceEvents: trace.events)
     }
 
     static func stageOriginalDocuments(_ documents: [AgentSourceDocument], documentsDirectory: URL,
@@ -326,7 +386,7 @@ enum AgentRunnerError: LocalizedError {
     case unsupportedBackend
     case notInstalled(String)
     case launchFailed(String, String)
-    case timeout(String)
+    case cancelled(String)
     case failed(String, String)
     case emptyResponse(String)
     case invalidSource(String)
@@ -336,7 +396,7 @@ enum AgentRunnerError: LocalizedError {
         case .unsupportedBackend: "直接 API 不应通过 AgentRunner 执行"
         case .notInstalled(let name): "未检测到 \(name) CLI，请先在终端安装并登录"
         case .launchFailed(let name, let detail): "无法启动 \(name)：\(detail)"
-        case .timeout(let name): "\(name) 执行超过 3 分钟，已终止"
+        case .cancelled(let name): "已停止 \(name) 执行"
         case .failed(let name, let detail): "\(name) 执行失败：\(detail)"
         case .emptyResponse(let name): "\(name) 没有返回回答"
         case .invalidSource(let name): "无法向 Agent 提供 \(name)：原文件不是普通文件或已成为符号链接"
