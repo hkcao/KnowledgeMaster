@@ -1,43 +1,62 @@
 # KnowledgeMaster（知屿）
 
-这是一个不使用向量数据库的第一版桌面原型。原始资料统一复制到应用数据目录的 `source/`，界面只呈现虚拟主题和文档关联。
+KnowledgeMaster 是使用 SwiftUI、AppKit 与 PDFKit 编写的原生 macOS 个人知识库应用，当前检索不依赖向量数据库。
 
 ## 当前能力
 
-- 导入 PDF、HTML、Markdown、TXT，或递归导入目录
-- 文件名相同默认丢弃，同时按 SHA-256 识别同内容副本
-- PDF 原稿预览与可划词文本阅读
-- HTML/Markdown/文本阅读、划词 Ask AI 和引用
-- 一个文档关联多个虚拟主题，拖到主题即可添加关联
-- 支持从 Finder 直接拖入文件或目录
-- 支持主题改名/删除、解除文档关联和删除原始资料
-- 文件名、主题、正文关键词检索，无向量依赖
-- 可选择当前文件或主题作为 AI 问答范围
-- DeepSeek、智谱 GLM 和自定义 OpenAI 兼容接口
-- API Key 使用 Electron `safeStorage` 加密后保存在本机
-- 永久保留对话历史，支持单次对话摘要和主题累计摘要
-- macOS 原生菜单与快捷键、Finder 数据目录入口
-- 元数据原子写入并保留上一版本备份
-- 可在设置中切换或迁移整个知识库目录；选择 iCloud Drive 路径即可使用系统同步
-- 阅读区支持多标签打开文档
-- 对话可选择是否自动包含当前激活的文档页面
+- 原生三栏 macOS 界面、菜单、设置窗口和多文档标签
+- 通过按钮或从 Finder 拖拽导入 PDF、HTML、Markdown、TXT，也可递归导入目录
+- 原始文件统一复制到知识库 `source/documents/`，界面仅呈现虚拟视图
+- 同名文件默认丢弃，并使用 SHA-256 识别内容重复
+- PDFKit 原稿阅读、原生选区和页码定位
+- HTML 富文本、Markdown 排版预览和纯文本阅读
+- 划词 Ask AI、引用、高亮、划线与笔记
+- 批注集中查看、编辑和删除；批注不修改 source 原文件
+- 一个文档可属于多个主题，支持拖拽到主题建立关联
+- 本地关键词搜索和导入后的主题推荐
+- 支持直接调用 DeepSeek、智谱 GLM、自定义 OpenAI 兼容接口，也可调用本机 Claude Code 或 Codex Agent
+- 直接 API 使用应用管理的 ReAct 工具循环，具备受限的文件列表、读取、检索和生成文件能力
+- AI 回复直接按 Markdown 排版显示；设置页可检测并测试本机 Agent CLI
+- API Key 保存在 macOS 钥匙串
+- 可同时选择多份文件和多个主题进行跨文档问答，并支持对话历史、单次对话摘要和批注上下文
+- 设置中切换或迁移知识库目录；选择 iCloud Drive 路径即可由系统同步
 
-## 启动
+## 开发运行
+
+要求 macOS 14 或更高版本，并安装 Xcode。
 
 ```bash
-npm install --cache /private/tmp/knowledge-organizer-npm-cache
-npm start
+swift run KnowledgeMaster
 ```
 
-首次使用时点击左上角设置按钮，选择服务商并填写 API Key。DeepSeek 默认使用 `deepseek-v4-flash`，智谱默认使用 `glm-5.2`；Base URL 和模型名均可编辑。
+运行测试：
+
+```bash
+swift test
+```
+
+## 生成原生 `.app`
+
+```bash
+./scripts/build-app.sh
+```
+
+产物位于：
+
+```text
+release/KnowledgeMaster.app
+```
+
+脚本使用 ad-hoc 签名，适用于本机运行。面向其他用户分发时仍需配置 Apple Developer ID 签名与 notarization。
 
 ## 本地数据
 
-应用数据存放在 Electron 的用户数据目录中，其下包含：
+默认知识库位于：
 
 ```text
-library/
+~/Library/Application Support/KnowledgeMaster/library/
 ├── knowledge.json
+├── knowledge.json.bak
 └── source/
     ├── documents/
     ├── downloads/
@@ -45,35 +64,31 @@ library/
     └── index/
 ```
 
-模型地址和加密后的 API Key 存放在本机应用设置目录，不会写入可同步的知识库目录。将知识库切换到 iCloud Drive 后，macOS 会同步 `source/`、主题、索引和对话历史；请避免在两台 Mac 上同时编辑同一个知识库。
+模型配置存放在 UserDefaults，API Key 单独存放在 macOS 钥匙串。将知识库目录切换到 iCloud Drive 后，原始资料、索引、主题、批注和对话历史会随目录同步。
 
-删除项目代码不会删除知识库数据。开发阶段若要清空数据，请从界面规划的数据管理功能处理；当前版本不要直接修改 `knowledge.json`。
+## AI 如何读取资料
 
-## macOS 打包
+直接 API 模式不会在首个请求中全量加载大型文档：
 
-生成 Apple Silicon 本地应用目录：
+1. 根据手动选择的文件、主题和“自动包含当前文档”开关确定范围。
+2. 从本地索引读取正文；PDF 保留页码。
+3. 正文按约 1400 字、180 字重叠切块并进行本地关键词评分。
+4. 每份选中文档先保留一个最佳片段，再按全局相关性补足，首轮最多发送 10 个片段和最近 12 条对话消息。
+5. 模型可在最多 8 轮的 ReAct 循环中调用 `list_files`、`search_files` 和 `read_file`，继续核实所选范围内的完整提取文本；支持一次返回多个工具调用。
+6. 模型不能访问任意本机路径：所选资料仅映射为内存中的只读 `documents/` 虚拟文件。工具参数由应用校验，绝对路径、`~`、`.` 和 `..` 均被拒绝。
+7. 用户明确要求生成报告等文件时，模型可调用 `write_file`，但只能写入当前对话专属的 `source/generated/<会话ID>/`；生成文件会随知识库目录和 iCloud 同步，并在聊天消息中提供 Finder 入口。
+8. “包含所选范围内的批注”开启时，相关高亮、划线和用户笔记也会进入上下文；系统提示会明确区分文档事实与用户笔记。
 
-```bash
-npm run pack:mac
-```
+Claude Code / Codex Agent 模式会为每轮问答创建临时隔离目录，将选中文档的提取文本副本、批注和最近对话放入其中：
 
-生成未签名的 DMG 和 ZIP：
-
-```bash
-npm run build:mac
-```
-
-面向其他用户分发前，仍需配置 Apple Developer ID 签名与 notarization。构建产物默认写入 `dist/`，不会提交到 Git。
+- Claude Code 使用非交互模式，只开放 Read、Grep、Glob，只读且不保存会话。
+- Codex 使用 `read-only` 沙箱、`--ephemeral` 临时会话，并忽略用户配置和项目规则。
+- Agent 最多接收 1000 万字符的文档副本，最长执行 3 分钟；结束、失败或取消后清理临时目录。
+- Agent 登录、订阅和凭据由对应 CLI 自己管理，知屿不会复制或保存这些凭据。
 
 ## 第一版边界
 
-- PDF 在原稿预览中无法把插件内的划词事件传给应用；切换到“文本阅读”后可以划词。
-- 关键词检索是本地线性检索，适用于个人知识库的几千份资料；后续可替换为 SQLite FTS，而不改变主题和文档关系。
-- 扫描版 PDF 尚未集成本地 OCR。
-- 暂未实现网页链接下载、Word/PPT、批注和导出。
-
-## 测试
-
-```bash
-npm test
-```
+- 当前检索为本地线性关键词检索，适用于个人知识库的几千份资料。
+- 扫描版 PDF 尚未集成 OCR。
+- 暂未支持 Word、PowerPoint、网页链接下载和批注导出。
+- 批注主要通过页码、PDF 选区矩形和选中文字锚定；纯文本中存在完全相同句子时优先匹配第一次出现的位置。
