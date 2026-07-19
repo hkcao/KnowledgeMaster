@@ -123,19 +123,29 @@ final class KnowledgeStoreTests: XCTestCase {
         XCTAssertEqual(position.y, 272, accuracy: 0.01)
     }
 
-    func testAgentArgumentsKeepBothCLIsReadOnlyAndEphemeral() {
+    func testAgentArgumentsAllowSkillsWithoutExposingTheLibrary() {
         let workspace = URL(fileURLWithPath: "/tmp/km-agent")
-        let answer = workspace.appendingPathComponent("answer.md")
-        let claude = AgentRunner.arguments(for: .claudeCode, workspace: workspace, answerURL: answer)
-        XCTAssertTrue(claude.contains("dontAsk"))
-        XCTAssertTrue(claude.contains("Read,Grep,Glob"))
+        let work = workspace.appendingPathComponent("work")
+        let documents = workspace.appendingPathComponent("documents")
+        let cache = workspace.appendingPathComponent("cache")
+        let answer = work.appendingPathComponent("answer.md")
+        let claude = AgentRunner.arguments(for: .claudeCode, workDirectory: work,
+                                           documentsDirectory: documents, cacheDirectory: cache, answerURL: answer)
+        XCTAssertTrue(claude.contains("auto"))
+        XCTAssertTrue(claude.contains("default"))
+        XCTAssertTrue(claude.contains(documents.path))
+        XCTAssertTrue(claude.contains(cache.path))
         XCTAssertTrue(claude.contains("--no-session-persistence"))
+        XCTAssertFalse(claude.contains("--disable-slash-commands"))
+        XCTAssertFalse(claude.contains("--safe-mode"))
         XCTAssertFalse(claude.contains("--dangerously-skip-permissions"))
 
-        let codex = AgentRunner.arguments(for: .codex, workspace: workspace, answerURL: answer)
-        XCTAssertTrue(codex.contains("read-only"))
+        let codex = AgentRunner.arguments(for: .codex, workDirectory: work,
+                                          documentsDirectory: documents, cacheDirectory: cache, answerURL: answer)
+        XCTAssertTrue(codex.contains("workspace-write"))
         XCTAssertTrue(codex.contains("--ephemeral"))
-        XCTAssertTrue(codex.contains("--ignore-user-config"))
+        XCTAssertFalse(codex.contains("--ignore-user-config"))
+        XCTAssertFalse(codex.contains("--ignore-rules"))
         XCTAssertFalse(codex.contains("--dangerously-bypass-approvals-and-sandbox"))
     }
 
@@ -147,11 +157,87 @@ final class KnowledgeStoreTests: XCTestCase {
             documents: [],
             annotations: []
         )
-        let prompt = AgentRunner.prompt(for: request, documentFiles: [("1-a.md", "a.pdf"), ("2-b.md", "b.md")])
-        XCTAssertTrue(prompt.contains("不可信资料"))
-        XCTAssertTrue(prompt.contains("只能读取这里的文件"))
-        XCTAssertTrue(prompt.contains("documents/1-a.md"))
+        let documentID = UUID()
+        let prompt = AgentRunner.prompt(for: request, documentFiles: [
+            (documentID, "../documents/\(documentID.uuidString)/a.pdf", "a.pdf", true)
+        ])
+        XCTAssertTrue(prompt.contains("不可信数据"))
+        XCTAssertTrue(prompt.contains("未经预切分的原始文件"))
+        XCTAssertTrue(prompt.contains("../documents/\(documentID.uuidString)/a.pdf"))
+        XCTAssertTrue(prompt.contains("generated/<文档ID>/"))
         XCTAssertTrue(prompt.contains("比较两份资料"))
+    }
+
+    func testAgentStagesAnExactReadOnlyCopyOfTheOriginalFile() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let original = root.appendingPathComponent("input/扫描资料.pdf")
+        let documents = root.appendingPathComponent("workspace/documents")
+        let cache = root.appendingPathComponent("workspace/cache")
+        try FileManager.default.createDirectory(at: original.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: documents, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+        let bytes = Data([0x25, 0x50, 0x44, 0x46, 0x2d, 0x01, 0x02, 0x03])
+        try bytes.write(to: original)
+        let id = UUID()
+        let source = AgentSourceDocument(id: id, name: original.lastPathComponent, sourceURL: original,
+                                         cacheURL: root.appendingPathComponent("persistent-cache/\(id.uuidString)"))
+
+        let manifest = try AgentRunner.stageOriginalDocuments([source], documentsDirectory: documents, cacheDirectory: cache)
+        let staged = documents.appendingPathComponent(id.uuidString).appendingPathComponent("扫描资料.pdf")
+
+        XCTAssertEqual(try Data(contentsOf: staged), bytes)
+        XCTAssertEqual(manifest.first?.1, "../documents/\(id.uuidString)/扫描资料.pdf")
+        XCTAssertEqual((try FileManager.default.attributesOfItem(atPath: staged.path)[.posixPermissions] as? NSNumber)?.intValue, 0o444)
+        let originalInode = try XCTUnwrap(FileManager.default.attributesOfItem(atPath: original.path)[.systemFileNumber] as? NSNumber)
+        let stagedInode = try XCTUnwrap(FileManager.default.attributesOfItem(atPath: staged.path)[.systemFileNumber] as? NSNumber)
+        XCTAssertNotEqual(originalInode, stagedInode)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staged.deletingPathExtension().appendingPathExtension("md").path))
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: staged.deletingLastPathComponent().path)
+        try FileManager.default.removeItem(at: staged)
+        XCTAssertEqual(try Data(contentsOf: original), bytes)
+    }
+
+    func testAgentRejectsASymbolicLinkAsAnOriginalDocument() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let original = root.appendingPathComponent("original.pdf")
+        let link = root.appendingPathComponent("linked.pdf")
+        let documents = root.appendingPathComponent("workspace/documents")
+        let cache = root.appendingPathComponent("workspace/cache")
+        try FileManager.default.createDirectory(at: documents, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+        try Data("PDF".utf8).write(to: original)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: original)
+        let item = AgentSourceDocument(id: UUID(), name: "linked.pdf", sourceURL: link,
+                                       cacheURL: root.appendingPathComponent("persistent-cache"))
+
+        XCTAssertThrowsError(try AgentRunner.stageOriginalDocuments([item], documentsDirectory: documents, cacheDirectory: cache))
+    }
+
+    func testAgentGeneratedParsingCacheOnlyAddsFilesForSelectedDocuments() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let generated = root.appendingPathComponent("generated")
+        let selectedID = UUID()
+        let unknownID = UUID()
+        let cache = root.appendingPathComponent("cache/\(selectedID.uuidString)")
+        try FileManager.default.createDirectory(at: generated.appendingPathComponent(selectedID.uuidString), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: generated.appendingPathComponent(unknownID.uuidString), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+        try "旧缓存".write(to: cache.appendingPathComponent("old.txt"), atomically: true, encoding: .utf8)
+        try "OCR 结果".write(to: generated.appendingPathComponent(selectedID.uuidString).appendingPathComponent("ocr.md"), atomically: true, encoding: .utf8)
+        try "不应同步".write(to: generated.appendingPathComponent(unknownID.uuidString).appendingPathComponent("ignored.md"), atomically: true, encoding: .utf8)
+        let document = AgentSourceDocument(id: selectedID, name: "a.pdf", sourceURL: root.appendingPathComponent("a.pdf"), cacheURL: cache)
+
+        let saved = try AgentRunner.syncGeneratedFiles(from: generated, documents: [document])
+
+        XCTAssertEqual(saved, ["source/generated/agent-cache/\(selectedID.uuidString)/ocr.md"])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: cache.appendingPathComponent("old.txt").path))
+        XCTAssertEqual(try String(contentsOf: cache.appendingPathComponent("ocr.md"), encoding: .utf8), "OCR 结果")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: cache.appendingPathComponent("ignored.md").path))
+    }
+
+    func testDirectAPIHasFragmentAndAutonomousContextModes() {
+        XCTAssertEqual(APIContextMode.allCases, [.relevantFragments, .autonomous])
     }
 
     func testAppTerminationStopsRegisteredAgentProcesses() throws {

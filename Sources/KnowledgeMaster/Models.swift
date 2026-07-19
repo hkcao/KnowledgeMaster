@@ -48,6 +48,19 @@ enum ChatPlacement: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum APIContextMode: String, Codable, CaseIterable, Identifiable {
+    case relevantFragments
+    case autonomous
+
+    var id: String { rawValue }
+    var name: String {
+        switch self {
+        case .relevantFragments: "相关片段"
+        case .autonomous: "自主检索"
+        }
+    }
+}
+
 struct KnowledgeData: Codable {
     var version: Int = 2
     var documents: [KnowledgeDocument] = []
@@ -293,12 +306,24 @@ struct AgentDocument: Hashable {
     var content: String
 }
 
+struct AgentSourceDocument: Hashable {
+    var id: UUID
+    var name: String
+    var sourceURL: URL
+    var cacheURL: URL
+}
+
 struct AgentRunRequest: Hashable {
     var question: String
     var quote: ReaderQuote?
     var history: [ChatMessage]
-    var documents: [AgentDocument]
+    var documents: [AgentSourceDocument]
     var annotations: [KnowledgeAnnotation]
+}
+
+struct AgentRunResult: Hashable {
+    var answer: String
+    var generatedFiles: [String]
 }
 
 struct ReaderSelection: Hashable {

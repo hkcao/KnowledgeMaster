@@ -51,6 +51,11 @@ final class KnowledgeStore: ObservableObject {
             .appendingPathComponent(conversationID.uuidString, isDirectory: true)
     }
 
+    var agentCacheURL: URL {
+        sourceURL.appendingPathComponent("generated", isDirectory: true)
+            .appendingPathComponent("agent-cache", isDirectory: true)
+    }
+
     func generatedFileURL(for storedPath: String) -> URL? {
         guard storedPath.hasPrefix("source/generated/") else { return nil }
         let url = rootURL.appendingPathComponent(storedPath).standardizedFileURL
@@ -305,6 +310,19 @@ final class KnowledgeStore: ObservableObject {
                 content = extracted.pages.map { "## 第 \($0.number) 页\n\n\($0.text)" }.joined(separator: "\n\n")
             }
             return AgentDocument(id: document.id, name: document.name, content: content)
+        }
+    }
+
+    func agentSourceDocuments(documentIDs: [UUID], topicIDs: [UUID]) -> [AgentSourceDocument] {
+        let topicDocumentIDs = data.documentTopics.filter { topicIDs.contains($0.topicId) }.map(\.documentId)
+        let selectedIDs = Set(documentIDs + topicDocumentIDs)
+        return data.documents.filter { selectedIDs.contains($0.id) }.map { document in
+            AgentSourceDocument(
+                id: document.id,
+                name: document.name,
+                sourceURL: storedURL(for: document),
+                cacheURL: agentCacheURL.appendingPathComponent(document.id.uuidString, isDirectory: true)
+            )
         }
     }
 

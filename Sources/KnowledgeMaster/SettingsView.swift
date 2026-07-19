@@ -97,7 +97,7 @@ struct SettingsView: View {
             let answer = try await AgentRunner.answer(backend: backend, request: AgentRunRequest(
                 question: "只回复：Agent 连接成功",
                 quote: nil, history: [], documents: [], annotations: []
-            ))
+            )).answer
             agentStatus = "\(backend.name)：\(answer)"
         } catch { agentStatus = error.localizedDescription }
     }
