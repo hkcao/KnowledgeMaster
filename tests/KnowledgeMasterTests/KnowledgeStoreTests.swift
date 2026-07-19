@@ -49,6 +49,46 @@ final class KnowledgeStoreTests: XCTestCase {
         XCTAssertEqual(Set(chunks.map(\.documentName)), Set(["rag.txt", "storage.txt"]))
     }
 
+    func testDocumentCanBelongToMultipleTopicDirectories() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let input = root.appendingPathComponent("input")
+        try FileManager.default.createDirectory(at: input, withIntermediateDirectories: true)
+        let file = input.appendingPathComponent("shared.md")
+        try "共享知识".write(to: file, atomically: true, encoding: .utf8)
+        let store = KnowledgeStore(rootURL: root.appendingPathComponent("library"))
+        _ = store.importFiles([file])
+        let document = try XCTUnwrap(store.data.documents.first)
+        store.createTopic("目录 A")
+        store.createTopic("目录 B")
+        let topics = store.data.topics
+        XCTAssertEqual(topics.count, 2)
+
+        store.link(documentID: document.id, topicID: topics[0].id)
+        store.link(documentID: document.id, topicID: topics[1].id)
+        XCTAssertEqual(store.documents(for: topics[0].id).map(\.id), [document.id])
+        XCTAssertEqual(store.documents(for: topics[1].id).map(\.id), [document.id])
+    }
+
+    func testChatOffersAllDockingPlacements() {
+        XCTAssertEqual(Set(ChatPlacement.allCases), Set([.right, .bottom, .sidebar, .hidden]))
+    }
+
+    func testAPIKeyIsLoadedOnceAndThenCachedInMemory() {
+        let suiteName = "KnowledgeMasterTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        var reads = 0
+        let settings = AppSettings(defaults: defaults) {
+            reads += 1
+            return "cached-key"
+        }
+
+        XCTAssertTrue(settings.hasAPIKey)
+        XCTAssertEqual(settings.apiKey, "cached-key")
+        XCTAssertTrue(settings.hasAPIKey)
+        XCTAssertEqual(reads, 1)
+    }
+
     func testDroppedDirectoryDiscoversSupportedFilesRecursively() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let nested = root.appendingPathComponent("nested")

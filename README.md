@@ -4,7 +4,7 @@ KnowledgeMaster 是使用 SwiftUI、AppKit 与 PDFKit 编写的原生 macOS 个�
 
 ## 当前能力
 
-- 原生三栏 macOS 界面、菜单、设置窗口和多文档标签
+- 原生 macOS 界面、菜单、设置窗口和多文档标签；知识问答可停靠在右侧、底部、左侧或完全隐藏
 - 通过按钮或从 Finder 拖拽导入 PDF、HTML、Markdown、TXT，也可递归导入目录
 - 原始文件统一复制到知识库 `source/documents/`，界面仅呈现虚拟视图
 - 同名文件默认丢弃，并使用 SHA-256 识别内容重复
@@ -12,12 +12,12 @@ KnowledgeMaster 是使用 SwiftUI、AppKit 与 PDFKit 编写的原生 macOS 个�
 - HTML 富文本、Markdown 排版预览和纯文本阅读
 - 划词 Ask AI、引用、高亮、划线与笔记
 - 批注集中查看、编辑和删除；批注不修改 source 原文件
-- 一个文档可属于多个主题，支持拖拽到主题建立关联
+- 左侧使用“主题目录 → 文档”的目录树；一个文档可同时显示在多个主题目录，支持拖拽建立关联
 - 本地关键词搜索和导入后的主题推荐
 - 支持直接调用 DeepSeek、智谱 GLM、自定义 OpenAI 兼容接口，也可调用本机 Claude Code 或 Codex Agent
 - 直接 API 使用应用管理的 ReAct 工具循环，具备受限的文件列表、读取、检索和生成文件能力
 - AI 回复直接按 Markdown 排版显示；设置页可检测并测试本机 Agent CLI
-- API Key 保存在 macOS 钥匙串
+- API Key 保存在 macOS 钥匙串；每次启动只读取一次，切换服务商或模型不会重复请求钥匙串权限
 - 可同时选择多份文件和多个主题进行跨文档问答，并支持对话历史、单次对话摘要和批注上下文
 - 设置中切换或迁移知识库目录；选择 iCloud Drive 路径即可由系统同步
 

@@ -23,6 +23,31 @@ enum ChatBackend: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum ChatPlacement: String, Codable, CaseIterable, Identifiable {
+    case right
+    case bottom
+    case sidebar
+    case hidden
+
+    var id: String { rawValue }
+    var name: String {
+        switch self {
+        case .right: "右侧"
+        case .bottom: "底部"
+        case .sidebar: "左侧合并"
+        case .hidden: "隐藏"
+        }
+    }
+    var icon: String {
+        switch self {
+        case .right: "rectangle.righthalf.inset.filled"
+        case .bottom: "rectangle.bottomhalf.inset.filled"
+        case .sidebar: "sidebar.left"
+        case .hidden: "eye.slash"
+        }
+    }
+}
+
 struct KnowledgeData: Codable {
     var version: Int = 2
     var documents: [KnowledgeDocument] = []

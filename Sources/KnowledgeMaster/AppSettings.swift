@@ -7,22 +7,26 @@ final class AppSettings: ObservableObject {
     @Published var baseURL: String { didSet { save() } }
     @Published var model: String { didSet { save() } }
     @Published var chatBackend: ChatBackend { didSet { save() } }
+    @Published var chatPlacement: ChatPlacement { didSet { save() } }
+    @Published private(set) var apiKey: String
+    private let defaults: UserDefaults
 
-    init() {
-        let defaults = UserDefaults.standard
+    init(defaults: UserDefaults = .standard, apiKeyLoader: () -> String? = Keychain.read) {
+        self.defaults = defaults
         provider = defaults.string(forKey: "provider") ?? "deepseek"
         baseURL = defaults.string(forKey: "baseURL") ?? "https://api.deepseek.com"
         model = defaults.string(forKey: "model") ?? "deepseek-chat"
         chatBackend = ChatBackend(rawValue: defaults.string(forKey: "chatBackend") ?? "") ?? .direct
+        chatPlacement = ChatPlacement(rawValue: defaults.string(forKey: "chatPlacement") ?? "") ?? .right
+        apiKey = apiKeyLoader() ?? ""
     }
 
-    var apiKey: String { Keychain.read() ?? "" }
     var hasAPIKey: Bool { !apiKey.isEmpty }
 
     func setAPIKey(_ value: String) throws {
         if value.isEmpty { try Keychain.delete() }
         else { try Keychain.write(value) }
-        objectWillChange.send()
+        apiKey = value
     }
 
     func applyDefaults(for provider: String) {
@@ -39,11 +43,11 @@ final class AppSettings: ObservableObject {
     }
 
     private func save() {
-        let defaults = UserDefaults.standard
         defaults.set(provider, forKey: "provider")
         defaults.set(baseURL, forKey: "baseURL")
         defaults.set(model, forKey: "model")
         defaults.set(chatBackend.rawValue, forKey: "chatBackend")
+        defaults.set(chatPlacement.rawValue, forKey: "chatPlacement")
     }
 }
 
