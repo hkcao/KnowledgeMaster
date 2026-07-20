@@ -2,7 +2,9 @@ import SwiftUI
 import AppKit
 
 enum ChatComposerBehavior {
-    static func shouldSendOnReturn(shiftPressed: Bool) -> Bool { !shiftPressed }
+    static func shouldSendOnReturn(shiftPressed: Bool, isComposing: Bool = false) -> Bool {
+        !shiftPressed && !isComposing
+    }
 }
 
 enum ChatScopeResolver {
@@ -33,6 +35,11 @@ struct ChatView: View {
     @State private var activeTraceEvents: [AgentTraceEvent] = []
     @State private var activeAgentRunID: UUID?
     @State private var activeAgentBackend: ChatBackend?
+    @State private var showAgentImport = false
+    @State private var pendingImportPaths: [String] = []
+    @State private var selectedPendingImports: Set<String> = []
+    @State private var importedAgentDocuments: [KnowledgeDocument] = []
+    @State private var selectedAgentTopics: Set<String> = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -98,6 +105,7 @@ struct ChatView: View {
         .frame(minWidth: 320, maxHeight: .infinity, alignment: .top)
         .sheet(isPresented: $showHistory) { historySheet }
         .sheet(isPresented: $showSummary) { summarySheet }
+        .sheet(isPresented: $showAgentImport) { agentImportSheet }
     }
 
     private var scope: some View {
@@ -165,7 +173,10 @@ struct ChatView: View {
                 .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.accentColor.opacity(0.28)))
                 .onKeyPress(.return, phases: [.down]) { keyPress in
-                    let shouldSend = ChatComposerBehavior.shouldSendOnReturn(shiftPressed: keyPress.modifiers.contains(.shift))
+                    let isComposing = (NSApp.keyWindow?.firstResponder as? NSTextInputClient)?.hasMarkedText() ?? false
+                    let shouldSend = ChatComposerBehavior.shouldSendOnReturn(
+                        shiftPressed: keyPress.modifiers.contains(.shift), isComposing: isComposing
+                    )
                     guard shouldSend else { return .ignored }
                     guard !sending, !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return .handled }
                     Task { await send() }
@@ -209,6 +220,23 @@ struct ChatView: View {
                             Label(URL(fileURLWithPath: path).lastPathComponent, systemImage: "doc.badge.arrow.up")
                                 .lineLimit(1)
                         }.buttonStyle(.link)
+                    }
+                }
+            }
+            if let files = message.pendingImports, !files.isEmpty {
+                let available = files.filter { store.pendingDownloadURL(for: $0) != nil }
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Agent 下载资料").font(.caption2.bold()).foregroundStyle(.secondary)
+                    ForEach(files, id: \.self) { path in
+                        Label(URL(fileURLWithPath: path).lastPathComponent,
+                              systemImage: store.pendingDownloadURL(for: path) == nil ? "checkmark.circle" : "tray.and.arrow.down")
+                            .font(.caption).lineLimit(1)
+                    }
+                    if !available.isEmpty {
+                        Button("审阅并导入…") { beginAgentImport(available) }
+                            .buttonStyle(.borderedProminent).controlSize(.small)
+                    } else {
+                        Text("已导入或移除").font(.caption2).foregroundStyle(.tertiary)
                     }
                 }
             }
@@ -378,6 +406,7 @@ struct ChatView: View {
             let answer: String
             var generatedFiles: [String] = []
             var traceEvents: [AgentTraceEvent] = []
+            var pendingImports: [String] = []
             if backend == .direct {
                 if settings.apiContextMode == .relevantFragments {
                     let systemPrompt = hasLocalScope
@@ -429,11 +458,13 @@ struct ChatView: View {
                     quote: activeQuote,
                     history: Array(conversation.messages.dropLast().suffix(12)),
                     documents: sourceDocuments,
-                    annotations: annotations
+                    annotations: annotations,
+                    downloadDirectory: store.pendingAgentDownloadsDirectory(for: runID)
                 ), runID: runID, onProgress: appendTrace)
                 answer = result.answer
                 generatedFiles = result.generatedFiles
                 traceEvents = result.traceEvents
+                pendingImports = result.downloadedFiles.compactMap(store.relativePendingDownloadPath(for:))
             }
             let annotationSources = annotations.enumerated().compactMap { index, annotation -> ContextChunk? in
                 guard let document = store.data.documents.first(where: { $0.id == annotation.documentId }) else { return nil }
@@ -448,11 +479,13 @@ struct ChatView: View {
             conversation.messages.append(ChatMessage(role: "assistant", content: answer, sources: documentSources + annotationSources,
                                                      backend: backend.rawValue,
                                                      generatedFiles: generatedFiles.isEmpty ? nil : generatedFiles,
+                                                     pendingImports: pendingImports.isEmpty ? nil : pendingImports,
                                                      traceEvents: traceEvents.isEmpty ? nil : traceEvents))
             conversation.documentIds = Array(selectedDocumentIDs); conversation.topicIds = Array(selectedTopicIDs)
             conversation.includeCurrentPage = includeCurrent; conversation.includeAnnotations = includeAnnotations
             conversation.currentDocumentId = currentDocument?.id; conversation.updatedAt = Date()
             store.saveConversation(conversation)
+            if !pendingImports.isEmpty { beginAgentImport(pendingImports) }
             quote = nil
             activeTraceEvents = []
             activeAgentBackend = nil
@@ -462,5 +495,111 @@ struct ChatView: View {
         }
         activeAgentRunID = nil
         sending = false
+    }
+
+    private func beginAgentImport(_ paths: [String]) {
+        pendingImportPaths = paths.filter { store.pendingDownloadURL(for: $0) != nil }
+        selectedPendingImports = Set(pendingImportPaths)
+        importedAgentDocuments = []
+        selectedAgentTopics = []
+        showAgentImport = !pendingImportPaths.isEmpty
+    }
+
+    private var agentImportSheet: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(importedAgentDocuments.isEmpty ? "导入 Agent 下载资料" : "确认虚拟主题")
+                .font(.title2.bold())
+            if importedAgentDocuments.isEmpty {
+                Text("文件仍在 source/downloads/pending 中，只有你确认后才会进入知识库。")
+                    .font(.caption).foregroundStyle(.secondary)
+                List(pendingImportPaths, id: \.self) { path in
+                    Toggle(isOn: Binding(get: { selectedPendingImports.contains(path) }, set: { checked in
+                        if checked { selectedPendingImports.insert(path) } else { selectedPendingImports.remove(path) }
+                    })) {
+                        VStack(alignment: .leading) {
+                            Text(URL(fileURLWithPath: path).lastPathComponent)
+                            Text(path).font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }.toggleStyle(.checkbox)
+                }
+                HStack {
+                    Button("移除未选文件", role: .destructive) {
+                        for path in pendingImportPaths where !selectedPendingImports.contains(path) {
+                            store.discardPendingDownload(at: path)
+                        }
+                        pendingImportPaths.removeAll { !selectedPendingImports.contains($0) }
+                    }.disabled(selectedPendingImports.count == pendingImportPaths.count)
+                    Spacer()
+                    Button("稍后") { showAgentImport = false }
+                    Button("导入所选") { importSelectedAgentFiles() }
+                        .buttonStyle(.borderedProminent).disabled(selectedPendingImports.isEmpty)
+                }
+            } else {
+                Text("主题只是虚拟关联，同一文档可选择多个。系统推荐已预先勾选，请人工确认。")
+                    .font(.caption).foregroundStyle(.secondary)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        ForEach(importedAgentDocuments) { document in
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text(document.displayTitle).font(.headline)
+                                let names = agentTopicChoices(for: document)
+                                if names.isEmpty {
+                                    Text("暂无推荐或已有主题，可先保持未分类。")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                ForEach(names, id: \.self) { name in
+                                    let key = "\(document.id.uuidString):\(name)"
+                                    Toggle(name, isOn: Binding(get: { selectedAgentTopics.contains(key) }, set: { checked in
+                                        if checked { selectedAgentTopics.insert(key) } else { selectedAgentTopics.remove(key) }
+                                    })).toggleStyle(.checkbox)
+                                }
+                            }
+                        }
+                    }
+                }
+                HStack {
+                    Spacer()
+                    Button("保持未分类") { showAgentImport = false }
+                    Button("确认主题") {
+                        for document in importedAgentDocuments {
+                            let selected = agentTopicChoices(for: document).filter {
+                                selectedAgentTopics.contains("\(document.id.uuidString):\($0)")
+                            }.map { TopicRecommendation(name: $0, reason: "用户确认") }
+                            store.applyRecommendations(selected, documentID: document.id)
+                        }
+                        showAgentImport = false
+                    }.buttonStyle(.borderedProminent)
+                }
+            }
+        }.padding(22).frame(width: 620, height: 500)
+    }
+
+    private func importSelectedAgentFiles() {
+        let before = Set(store.data.documents.map(\.id))
+        var failed: [String] = []
+        for path in selectedPendingImports.sorted() {
+            guard let url = store.pendingDownloadURL(for: path) else { continue }
+            let result = store.importFiles([url]).first ?? "导入失败"
+            if result.hasPrefix("导入失败") || result.hasPrefix("不支持") {
+                failed.append(url.lastPathComponent)
+            } else {
+                store.discardPendingDownload(at: path)
+            }
+        }
+        importedAgentDocuments = store.data.documents.filter { !before.contains($0.id) }
+        selectedAgentTopics = Set(importedAgentDocuments.flatMap { document in
+            store.recommendTopics(for: document).map { "\(document.id.uuidString):\($0.name)" }
+        })
+        if !failed.isEmpty {
+            error = "以下文件导入失败，仍保留在待导入区：\(failed.joined(separator: "、"))"
+        }
+        if importedAgentDocuments.isEmpty && failed.isEmpty { showAgentImport = false }
+    }
+
+    private func agentTopicChoices(for document: KnowledgeDocument) -> [String] {
+        var seen = Set<String>()
+        return (store.recommendTopics(for: document).map(\.name) + store.data.topics.map(\.name)).filter {
+            seen.insert($0.lowercased()).inserted
+        }
     }
 }

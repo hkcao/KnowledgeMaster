@@ -37,7 +37,7 @@ struct SettingsView: View {
                     }
                 }
                 if !agentStatus.isEmpty { Text(agentStatus).font(.caption).foregroundStyle(.secondary) }
-                Text("Agent 模式只会收到本轮选中原格式文件的独立临时副本；执行过程可实时展开查看并手动停止。登录和订阅由对应 CLI 管理。")
+                Text("Agent 模式只会收到本轮选中原格式文件的独立临时副本；执行过程可实时展开并手动停止。Agent 下载的资料先隔离暂存，需人工确认导入与虚拟主题。登录和订阅由对应 CLI 管理。")
                     .font(.caption).foregroundStyle(.secondary)
                 DisclosureGroup("Claude Code / Codex 接入步骤") {
                     VStack(alignment: .leading, spacing: 8) {

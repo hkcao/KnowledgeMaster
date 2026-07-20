@@ -56,6 +56,40 @@ final class KnowledgeStore: ObservableObject {
             .appendingPathComponent("agent-cache", isDirectory: true)
     }
 
+    func pendingAgentDownloadsDirectory(for runID: UUID) -> URL {
+        sourceURL.appendingPathComponent("downloads", isDirectory: true)
+            .appendingPathComponent("pending", isDirectory: true)
+            .appendingPathComponent(runID.uuidString, isDirectory: true)
+    }
+
+    func relativePendingDownloadPath(for url: URL) -> String? {
+        let root = rootURL.standardizedFileURL.path + "/"
+        let path = url.standardizedFileURL.path
+        guard path.hasPrefix(root + "source/downloads/pending/") else { return nil }
+        return String(path.dropFirst(root.count))
+    }
+
+    func pendingDownloadURL(for storedPath: String) -> URL? {
+        guard storedPath.hasPrefix("source/downloads/pending/") else { return nil }
+        let url = rootURL.appendingPathComponent(storedPath).standardizedFileURL
+        let pendingRoot = sourceURL.appendingPathComponent("downloads/pending", isDirectory: true)
+            .standardizedFileURL.path + "/"
+        guard url.path.hasPrefix(pendingRoot), manager.fileExists(atPath: url.path) else { return nil }
+        return url
+    }
+
+    func discardPendingDownload(at storedPath: String) {
+        guard let url = pendingDownloadURL(for: storedPath) else { return }
+        try? manager.removeItem(at: url)
+        var directory = url.deletingLastPathComponent()
+        let pendingRoot = sourceURL.appendingPathComponent("downloads/pending", isDirectory: true).standardizedFileURL
+        while directory.path.hasPrefix(pendingRoot.path + "/"), directory != pendingRoot,
+              (try? manager.contentsOfDirectory(atPath: directory.path).isEmpty) == true {
+            try? manager.removeItem(at: directory)
+            directory.deleteLastPathComponent()
+        }
+    }
+
     func generatedFileURL(for storedPath: String) -> URL? {
         guard storedPath.hasPrefix("source/generated/") else { return nil }
         let url = rootURL.appendingPathComponent(storedPath).standardizedFileURL

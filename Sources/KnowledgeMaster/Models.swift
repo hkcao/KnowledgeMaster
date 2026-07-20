@@ -252,11 +252,13 @@ struct ChatMessage: Codable, Identifiable, Hashable {
     var sources: [ContextChunk]?
     var backend: String?
     var generatedFiles: [String]?
+    var pendingImports: [String]?
     var traceEvents: [AgentTraceEvent]?
     var createdAt: Date
 
     init(id: UUID = UUID(), role: String, content: String, quote: ReaderQuote? = nil,
          sources: [ContextChunk]? = nil, backend: String? = nil, generatedFiles: [String]? = nil,
+         pendingImports: [String]? = nil,
          traceEvents: [AgentTraceEvent]? = nil,
          createdAt: Date = Date()) {
         self.id = id
@@ -266,6 +268,7 @@ struct ChatMessage: Codable, Identifiable, Hashable {
         self.sources = sources
         self.backend = backend
         self.generatedFiles = generatedFiles
+        self.pendingImports = pendingImports
         self.traceEvents = traceEvents
         self.createdAt = createdAt
     }
@@ -377,12 +380,14 @@ struct AgentRunRequest: Hashable {
     var history: [ChatMessage]
     var documents: [AgentSourceDocument]
     var annotations: [KnowledgeAnnotation]
+    var downloadDirectory: URL? = nil
 }
 
 struct AgentRunResult: Hashable {
     var answer: String
     var generatedFiles: [String]
     var traceEvents: [AgentTraceEvent]
+    var downloadedFiles: [URL] = []
 }
 
 struct ReaderSelection: Hashable {

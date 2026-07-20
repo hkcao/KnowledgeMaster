@@ -61,7 +61,11 @@ struct AgentStreamParser {
         case "turn.failed":
             return event(.error, "Codex 执行失败", nestedMessage(json))
         case "error":
-            return event(.error, "Codex 返回错误", nestedMessage(json))
+            let message = nestedMessage(json)
+            if message?.localizedCaseInsensitiveContains("reconnecting") == true {
+                return event(.warning, "网络超时，Codex 正在重连", message)
+            }
+            return event(.error, "Codex 返回错误", message)
         case "item.started", "item.updated", "item.completed":
             guard let item = json["item"] as? [String: Any] else { return AgentStreamUpdate() }
             return parseCodexItem(item, phase: type, workspacePath: workspacePath)

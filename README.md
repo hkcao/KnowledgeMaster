@@ -20,6 +20,7 @@ KnowledgeMaster 是使用 SwiftUI、AppKit 与 PDFKit 编写的原生 macOS 个�
 - 支持直接调用 DeepSeek、智谱 GLM、自定义 OpenAI 兼容接口，也可调用本机 Claude Code 或 Codex Agent
 - 直接 API 可选“相关片段”或“自主检索”；自主检索使用应用管理的 ReAct 工具循环，具备受限的文件列表、读取、检索和生成文件能力
 - Claude Code / Codex 的工具、文件和状态事件会实时显示在可折叠执行过程面板中；历史对话保留过程记录，但过滤内部推理事件
+- Agent 调研下载的 PDF、HTML、Markdown、TXT 会先进入 `source/downloads/pending/` 隔离区；用户勾选确认后才导入，并在第二步人工确认一个或多个虚拟主题
 - AI 回复使用应用内置的离线 Markdown 与 KaTeX 预览，保留标题、段落、列表、表格、代码块和换行，并渲染 `$...$`、`$$...$$` 等 LaTeX 公式
 - API Key 保存在 macOS 钥匙串；每次启动只读取一次，切换服务商或模型不会重复请求钥匙串权限
 - 可同时选择多份文件和多个主题进行跨文档问答，并支持对话历史、单次对话摘要和批注上下文；历史列表会显示每段对话涉及的文档；默认不包含当前文档，未选范围时就是不加载本地资料的纯聊天
@@ -85,15 +86,17 @@ release/KnowledgeMaster.app
 Claude Code / Codex Agent 模式不会使用应用预先提取或切块的文本。每轮问答会创建临时隔离目录，并把选中的原格式文件逐字节复制进去；Agent 得到的是 PDF、HTML、Markdown 或 TXT 临时副本，不是真实 `source/documents/` 路径：
 
 - 临时 `documents/` 与已有的 `cache/` 副本设为只读；Agent 只允许把工作结果写到本轮 `work/`。即使 Agent 删除或损坏临时副本，也不会影响知识库原件。
-- Codex 使用 `workspace-write` 沙箱，写权限限制在本轮 `work/`，并使用 `--ephemeral` 临时会话；关闭当前问答不需要的 Apps/远程插件目录加载，仍保留用户 Skill 与实时网页搜索。
+- Codex 使用 `workspace-write` 沙箱，写权限限制在本轮 `work/`，并使用 `--ephemeral` 临时会话；关闭当前问答不需要的 Apps/远程插件目录加载，仍保留用户 Skill、实时网页搜索和本轮下载所需的出站网络。
 - Claude Code 使用非交互模式、默认工具和用户级配置，以便按需调用用户已经安装的 PDF/OCR Skill；它看到的资料路径仍只有临时副本，不会收到知识库原件路径。
 - Agent 可先查看已有解析缓存，再决定是否重新解析。可复用的 OCR、全文解析或结构化结果只有写到 `work/generated/<文档ID>/` 才会被应用同步到 `source/generated/agent-cache/<文档ID>/`，下次运行以只读缓存副本提供。
 - 应用导入 PDF 时生成的基础提取结果也会作为 `cache/<文档ID>/_app/extracted.json` 告知 Agent；Agent 可先复用它，再按版式或 OCR 需要读取原始 PDF。
 - PDF 划词截图会作为本轮只读的 `documents/_selection/selection.png` 提供给 Claude Code/Codex，并在提示中标明；Agent 可结合选中文字、截图、已有解析缓存和原始 PDF 判断是否需要进一步解析。
 - 缓存同步只接受本轮所选文档 ID 下的普通文件，忽略符号链接和未知文档目录，单轮上限 200 个文件、500 MB；同步只新增或覆盖同名缓存，不清理原文件或旧缓存。
+- Agent 要求下载知识资料时只能写入本轮 `work/downloads/`；应用只接收受支持的普通文件，最多 100 个、总计 500 MB，并复制到 `source/downloads/pending/`。聊天中会显示“审阅并导入”，确认文件后再确认推荐或已有主题；未确认文件不会出现在知识目录。
 - Agent 不设置固定执行超时，长时间 PDF 解析或 OCR 可以继续运行；执行过程面板提供“停止”按钮，只终止当前这一轮。设置页的连接测试也可单独停止。
 - Codex 的 JSONL 与 Claude Code 的 stream-json 输出会归一化为状态、工具、文件、缓存、完成和错误事件；内部 reasoning 事件不会进入界面或对话历史。
-- Claude Code 保留默认 WebSearch/WebFetch 工具；Codex 每轮显式启用内置 live web search。涉及新闻、价格、政策或版本等时效问题时，Agent 会被要求联网核实、标明日期和 URL。通用 shell 出站网络仍保持沙箱限制，直接 API 模式当前也没有网页搜索工具。
+- Claude Code 保留默认 WebSearch/WebFetch 工具；Codex 每轮显式启用内置 live web search。涉及新闻、价格、政策或版本等时效问题时，Agent 会被要求联网核实、标明日期和 URL。Codex 的 shell 出站网络仅在本轮隔离工作区中开放，以便下载用户要求的资料；直接 API 模式当前没有网页搜索工具。
+- 从 Finder 启动应用时，知屿会读取 macOS 系统 HTTP/HTTPS/SOCKS 代理并注入 Agent 子进程，避免 CLI 只在终端中可联网；用户显式设置的代理环境优先。
 - Agent 正常结束、失败或由用户停止后都会清理整份临时目录。
 - Agent 登录、订阅和凭据由对应 CLI 自己管理，知屿不会复制或保存这些凭据。
 - 退出知屿时，所有仍在运行的 Claude Code / Codex 子进程都会收到终止信号；正常完成的每轮调用本来也会立即退出，不保留 Agent 会话。
@@ -133,5 +136,5 @@ CLI 位于另一台机器时，当前版本不直接通过 SSH 调用。远程 A
 
 - 当前检索为本地线性关键词检索，适用于个人知识库的几千份资料。
 - 应用自身尚未内置 OCR；Agent 模式可调用用户环境中已有的 PDF/OCR Skill，并缓存其生成的解析文件。
-- 暂未支持 Word、PowerPoint、网页链接下载和批注导出。
+- 暂未支持 Word、PowerPoint、在主界面直接粘贴网页链接导入和批注导出；Agent 模式可调研并下载受支持的资料后走人工确认导入流程。
 - 批注主要通过页码、PDF 选区矩形和选中文字锚定；纯文本中存在完全相同句子时优先匹配第一次出现的位置。

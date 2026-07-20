@@ -169,6 +169,7 @@ final class KnowledgeStoreTests: XCTestCase {
     func testReturnSendsAndShiftReturnKeepsNewline() {
         XCTAssertTrue(ChatComposerBehavior.shouldSendOnReturn(shiftPressed: false))
         XCTAssertFalse(ChatComposerBehavior.shouldSendOnReturn(shiftPressed: true))
+        XCTAssertFalse(ChatComposerBehavior.shouldSendOnReturn(shiftPressed: false, isComposing: true))
     }
 
     func testQuotedSelectionAutomaticallyAuthorizesItsOriginalDocument() {
@@ -278,7 +279,7 @@ final class KnowledgeStoreTests: XCTestCase {
                                           documentsDirectory: documents, cacheDirectory: cache, answerURL: answer)
         XCTAssertTrue(codex.contains("workspace-write"))
         XCTAssertTrue(codex.contains("web_search=\"live\""))
-        XCTAssertTrue(codex.contains("tools.web_search=true"))
+        XCTAssertTrue(codex.contains("sandbox_workspace_write.network_access=true"))
         XCTAssertTrue(codex.contains("features.apps=false"))
         XCTAssertTrue(codex.contains("features.remote_plugin=false"))
         XCTAssertTrue(codex.contains("--ephemeral"))
@@ -480,6 +481,48 @@ final class KnowledgeStoreTests: XCTestCase {
         XCTAssertEqual(command.events.first?.kind, .tool)
         XCTAssertEqual(command.events.first?.title, "正在执行命令")
         XCTAssertTrue(command.events.first?.detail?.contains("pdftotext") == true)
+    }
+
+    func testCodexReconnectIsAWarningRatherThanAFinalError() {
+        let update = AgentStreamParser.parse(
+            line: #"{"type":"error","message":"Reconnecting... 2/5 (request timed out)"}"#,
+            backend: .codex
+        )
+
+        XCTAssertEqual(update.events.first?.kind, .warning)
+        XCTAssertEqual(update.events.first?.title, "网络超时，Codex 正在重连")
+    }
+
+    func testFinderLaunchedAgentReceivesMacOSSystemProxySettings() {
+        let environment = AgentRunner.sanitizedEnvironment(for: .codex, source: [
+            "HOME": "/Users/test", "PATH": "/usr/bin"
+        ], systemProxies: [
+            "HTTPEnable": 1, "HTTPProxy": "127.0.0.1", "HTTPPort": 7892,
+            "HTTPSEnable": 1, "HTTPSProxy": "127.0.0.1", "HTTPSPort": 7892,
+            "SOCKSEnable": 1, "SOCKSProxy": "127.0.0.1", "SOCKSPort": 7892,
+            "ExceptionsList": ["localhost", "127.*"]
+        ])
+
+        XCTAssertEqual(environment["HTTPS_PROXY"], "http://127.0.0.1:7892")
+        XCTAssertEqual(environment["https_proxy"], "http://127.0.0.1:7892")
+        XCTAssertEqual(environment["ALL_PROXY"], "socks5://127.0.0.1:7892")
+        XCTAssertEqual(environment["NO_PROXY"], "localhost,127.*")
+        XCTAssertNil(environment["OPENAI_API_KEY"])
+    }
+
+    func testAgentDownloadsOnlySupportedRegularFilesIntoPendingArea() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let source = root.appendingPathComponent("work/downloads")
+        let destination = root.appendingPathComponent("library/source/downloads/pending/run")
+        try FileManager.default.createDirectory(at: source.appendingPathComponent("papers"), withIntermediateDirectories: true)
+        try Data("PDF".utf8).write(to: source.appendingPathComponent("papers/research.pdf"))
+        try Data("image".utf8).write(to: source.appendingPathComponent("cover.png"))
+
+        let downloaded = try AgentRunner.syncDownloadedFiles(from: source, to: destination)
+
+        XCTAssertEqual(downloaded.map(\.lastPathComponent), ["research.pdf"])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destination.appendingPathComponent("papers/research.pdf").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.appendingPathComponent("cover.png").path))
     }
 
     func testClaudeStreamParserExtractsToolProgressAndFinalAnswerIncrementally() {
