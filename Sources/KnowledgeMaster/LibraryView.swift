@@ -353,7 +353,8 @@ private struct NotesLibraryView: View {
                                         VStack(alignment: .leading, spacing: 3) {
                                         Text(note.title).lineLimit(1)
                                         HStack {
-                                            Text(note.content.isEmpty ? "暂无正文" : note.content).lineLimit(1)
+                                            let body = store.summaryNoteContent(for: note)
+                                            Text(body.isEmpty ? "暂无正文" : body).lineLimit(1)
                                             if !note.annotationIDs.isEmpty { Text("· 关联 \(note.annotationIDs.count) 条") }
                                         }.font(.caption2).foregroundStyle(.secondary)
                                         }.frame(maxWidth: .infinity, alignment: .leading)
@@ -419,6 +420,13 @@ private struct SummaryNoteEditor: View {
     @State private var title: String
     @State private var content: String
     @State private var annotationIDs: Set<UUID>
+    @State private var mode: Mode
+
+    private enum Mode: String, CaseIterable, Identifiable {
+        case preview = "预览"
+        case edit = "编辑"
+        var id: String { rawValue }
+    }
 
     init(note: SummaryNote?, onSave: @escaping (String, String, [UUID]) -> Void,
          onCancel: @escaping () -> Void) {
@@ -426,16 +434,42 @@ private struct SummaryNoteEditor: View {
         self.onSave = onSave
         self.onCancel = onCancel
         _title = State(initialValue: note?.title ?? "")
-        _content = State(initialValue: note?.content ?? "")
+        _content = State(initialValue: note.map { value in
+            // 已有笔记的正文会在 KnowledgeStore.load 时从对应 .md 文件同步到缓存。
+            value.content
+        } ?? "")
         _annotationIDs = State(initialValue: Set(note?.annotationIDs ?? []))
+        _mode = State(initialValue: note == nil ? .edit : .preview)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(note == nil ? "新建总结笔记" : "编辑总结笔记").font(.title2.bold())
-            TextField("标题", text: $title).textFieldStyle(.roundedBorder)
-            TextEditor(text: $content).font(.body).frame(minHeight: 190)
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(.separator))
+            HStack {
+                Picker("显示方式", selection: $mode) {
+                    ForEach(Mode.allCases) { item in Text(item.rawValue).tag(item) }
+                }.pickerStyle(.segmented).labelsHidden().frame(width: 150)
+                Spacer()
+                if let note, let url = store.summaryNoteURL(for: note) {
+                    Button("在 Finder 中显示", systemImage: "folder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([url])
+                    }.buttonStyle(.borderless)
+                }
+            }
+            if mode == .edit {
+                TextField("标题", text: $title).textFieldStyle(.roundedBorder)
+                TextEditor(text: $content).font(.system(.body, design: .monospaced)).frame(minHeight: 190)
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(.separator))
+            } else {
+                ScrollView {
+                    ChatMarkdownView(markdown: KnowledgeStore.summaryNoteMarkdown(title: title, content: content))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                }
+                .frame(minHeight: 230)
+                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 7))
+                .overlay(RoundedRectangle(cornerRadius: 7).stroke(.separator))
+            }
             Text("关联注释类笔记").font(.headline)
             if store.data.annotations.isEmpty {
                 Text("暂无可关联批注").font(.caption).foregroundStyle(.secondary)
@@ -448,7 +482,7 @@ private struct SummaryNoteEditor: View {
                                 .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                         }
                     }.toggleStyle(.checkbox)
-                }.frame(minHeight: 180)
+                }.frame(minHeight: 150)
             }
             HStack {
                 Spacer()
@@ -457,7 +491,7 @@ private struct SummaryNoteEditor: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-        }.padding(22).frame(width: 620, height: 620)
+        }.padding(22).frame(width: 680, height: 680)
     }
 
     private func binding(for id: UUID) -> Binding<Bool> {

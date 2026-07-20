@@ -3,6 +3,65 @@ import PDFKit
 
 private final class InteractivePDFView: PDFView {
     var onKnowledgeAnnotationClick: ((UUID) -> Void)?
+    private var markerAnchors: [UUID: AnnotationRect] = [:]
+    private var markerButtons: [UUID: NSButton] = [:]
+
+    func updateAnnotationMarkers(_ annotations: [KnowledgeAnnotation]) {
+        guard let document else { return }
+        let values = annotations.compactMap { item -> (UUID, AnnotationRect, String)? in
+            guard !item.note.isEmpty,
+                  let anchor = PDFKnowledgeAnnotationRenderer.resolvedRects(for: item, in: document).last else {
+                return nil
+            }
+            return (item.id, anchor, item.note)
+        }
+        markerAnchors = Dictionary(uniqueKeysWithValues: values.map { ($0.0, $0.1) })
+        let ids = Set(markerAnchors.keys)
+        for id in markerButtons.keys.filter({ !ids.contains($0) }) {
+            markerButtons.removeValue(forKey: id)?.removeFromSuperview()
+        }
+        for (id, _, help) in values where markerButtons[id] == nil {
+            let button = NSButton()
+            button.isBordered = false
+            button.imagePosition = .imageOnly
+            button.image = NSImage(systemSymbolName: "text.bubble.fill", accessibilityDescription: "打开批注")
+            button.contentTintColor = .systemGreen
+            button.identifier = NSUserInterfaceItemIdentifier(id.uuidString)
+            button.toolTip = help
+            button.target = self
+            button.action = #selector(annotationButtonClicked(_:))
+            markerButtons[id] = button
+        }
+        positionAnnotationMarkers()
+    }
+
+    override func layout() {
+        super.layout()
+        positionAnnotationMarkers()
+    }
+
+    private func positionAnnotationMarkers() {
+        guard let documentView else { return }
+        for (id, anchor) in markerAnchors {
+            guard let button = markerButtons[id],
+                  let page = document?.page(at: anchor.page - 1) else { continue }
+            if button.superview !== documentView {
+                button.removeFromSuperview()
+                documentView.addSubview(button)
+            }
+            let viewRect = convert(anchor.cgRect, from: page)
+            let rect = documentView.convert(viewRect, from: self)
+            let size: CGFloat = 18
+            let x = min(rect.maxX + 4, documentView.bounds.maxX - size - 2)
+            button.frame = CGRect(x: max(documentView.bounds.minX + 2, x),
+                                  y: rect.midY - size / 2, width: size, height: size)
+        }
+    }
+
+    @objc private func annotationButtonClicked(_ sender: NSButton) {
+        guard let value = sender.identifier?.rawValue, let id = UUID(uuidString: value) else { return }
+        onKnowledgeAnnotationClick?(id)
+    }
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
@@ -43,6 +102,7 @@ struct PDFReaderView: NSViewRepresentable {
             view.document = PDFDocument(url: url)
         }
         context.coordinator.render(annotations: annotations, in: view)
+        (view as? InteractivePDFView)?.updateAnnotationMarkers(annotations)
         context.coordinator.focus(annotationID: focusedAnnotationID, annotations: annotations, in: view)
     }
 
@@ -85,32 +145,7 @@ struct PDFReaderView: NSViewRepresentable {
 
         func render(annotations: [KnowledgeAnnotation], in view: PDFView) {
             guard let document = view.document else { return }
-            for index in 0..<document.pageCount {
-                guard let page = document.page(at: index) else { continue }
-                for annotation in page.annotations where KnowledgeAnnotationReference.id(fromPDFContents: annotation.contents) != nil {
-                    page.removeAnnotation(annotation)
-                }
-            }
-            for item in annotations {
-                var rects = item.rects
-                if rects.isEmpty, let match = document.findString(item.quote, withOptions: [.caseInsensitive]).first,
-                   let page = match.pages.first {
-                    let pageIndex = document.index(for: page) + 1
-                    if item.page == nil || item.page == pageIndex {
-                        let bounds = match.bounds(for: page)
-                        rects = [AnnotationRect(page: pageIndex, x: bounds.origin.x, y: bounds.origin.y,
-                                                width: bounds.width, height: bounds.height)]
-                    }
-                }
-                for rect in rects {
-                    guard let page = document.page(at: rect.page - 1) else { continue }
-                    let subtype: PDFAnnotationSubtype = item.kind == "underline" ? .underline : .highlight
-                    let annotation = PDFAnnotation(bounds: rect.cgRect, forType: subtype, withProperties: nil)
-                    annotation.contents = KnowledgeAnnotationReference.pdfContents(for: item.id)
-                    annotation.color = item.kind == "note" ? NSColor.systemGreen.withAlphaComponent(0.35) : NSColor.systemYellow.withAlphaComponent(0.45)
-                    page.addAnnotation(annotation)
-                }
-            }
+            PDFKnowledgeAnnotationRenderer.render(annotations, in: document, interactive: true)
         }
 
         func focus(annotationID: UUID?, annotations: [KnowledgeAnnotation], in view: PDFView) {

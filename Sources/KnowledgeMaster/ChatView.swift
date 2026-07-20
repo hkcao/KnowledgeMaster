@@ -70,7 +70,12 @@ struct ChatView: View {
             HStack {
                 Label("知识问答", systemImage: "sparkles").font(.headline)
                 Spacer()
-                Button { Task { await summarizeConversation() } } label: { Image(systemName: "text.quote") }.help("提炼对话摘要").disabled(conversation.messages.isEmpty || sending)
+                Button {
+                    if conversation.summary.isEmpty { Task { await summarizeConversation() } }
+                    else { showSummary = true }
+                } label: { Image(systemName: "text.quote") }
+                    .help(conversation.summary.isEmpty ? "提炼对话摘要" : "查看对话摘要")
+                    .disabled(conversation.messages.isEmpty || sending)
                 Button { showHistory = true } label: { Image(systemName: "clock.arrow.circlepath") }.help("对话历史")
                 Button { newChat() } label: { Image(systemName: "plus") }.help("新对话").disabled(sending)
             }.padding(14).frame(height: 58)
@@ -357,7 +362,11 @@ struct ChatView: View {
     private var summarySheet: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("对话摘要").font(.title2.bold())
-            ScrollView { Text(conversation.summary).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
+            ScrollView {
+                ChatMarkdownView(markdown: conversation.summary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+            }
             HStack { Spacer(); Button("完成") { showSummary = false }.keyboardShortcut(.defaultAction) }
         }.padding(22).frame(width: 620, height: 480)
     }
@@ -372,7 +381,7 @@ struct ChatView: View {
         do {
             if settings.chatBackend == .direct {
                 conversation.summary = try await AIClient.completion(settings: settings, messages: [
-                    .init(role: "system", content: "将对话提炼为中文摘要：讨论主题、关键结论、待确认问题、后续行动。不要添加材料中没有的信息。"),
+                    .init(role: "system", content: "将对话提炼为中文 Markdown 摘要，按讨论主题、关键结论、待确认问题、后续行动组织。数学公式使用 $...$ 或 $$...$$ LaTeX 语法，不要把全文放入代码围栏，不要添加材料中没有的信息。"),
                     .init(role: "user", content: String(transcript.suffix(30_000)))
                 ])
             } else {
@@ -381,7 +390,7 @@ struct ChatView: View {
                 activeAgentRunID = runID
                 activeAgentBackend = settings.chatBackend
                 conversation.summary = try await AgentRunner.answer(backend: settings.chatBackend, request: AgentRunRequest(
-                    question: "将以上对话提炼为中文摘要：讨论主题、关键结论、待确认问题、后续行动。不要添加对话中没有的信息。",
+                    question: "将以上对话提炼为中文 Markdown 摘要，按讨论主题、关键结论、待确认问题、后续行动组织。数学公式使用 $...$ 或 $$...$$ LaTeX 语法，不要把全文放入代码围栏，不要添加对话中没有的信息。",
                     quote: nil, history: Array(conversation.messages.suffix(30)), documents: [], annotations: []
                 ), runID: runID, onProgress: appendTrace).answer
             }

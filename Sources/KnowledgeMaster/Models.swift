@@ -62,7 +62,7 @@ enum APIContextMode: String, Codable, CaseIterable, Identifiable {
 }
 
 struct KnowledgeData: Codable {
-    var version: Int = 3
+    var version: Int = 4
     var documents: [KnowledgeDocument] = []
     var topics: [Topic] = []
     var documentTopics: [DocumentTopic] = []
@@ -75,7 +75,7 @@ struct KnowledgeData: Codable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        version = try container.decodeIfPresent(Int.self, forKey: .version) ?? 3
+        version = try container.decodeIfPresent(Int.self, forKey: .version) ?? 4
         documents = try container.decodeIfPresent([KnowledgeDocument].self, forKey: .documents) ?? []
         topics = try container.decodeIfPresent([Topic].self, forKey: .topics) ?? []
         documentTopics = try container.decodeIfPresent([DocumentTopic].self, forKey: .documentTopics) ?? []
@@ -334,15 +334,18 @@ struct SummaryNote: Codable, Identifiable, Hashable {
     var id: UUID
     var title: String
     var content: String
+    var storedPath: String?
     var annotationIDs: [UUID]
     var createdAt: Date
     var updatedAt: Date
 
-    init(id: UUID = UUID(), title: String, content: String = "", annotationIDs: [UUID] = [],
+    init(id: UUID = UUID(), title: String, content: String = "", storedPath: String? = nil,
+         annotationIDs: [UUID] = [],
          createdAt: Date = Date(), updatedAt: Date = Date()) {
         self.id = id
         self.title = title
         self.content = content
+        self.storedPath = storedPath
         self.annotationIDs = annotationIDs
         self.createdAt = createdAt
         self.updatedAt = updatedAt

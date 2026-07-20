@@ -1,4 +1,5 @@
 import XCTest
+import PDFKit
 @testable import KnowledgeMaster
 
 @MainActor
@@ -63,10 +64,103 @@ final class KnowledgeStoreTests: XCTestCase {
         let summary = try XCTUnwrap(store.createSummaryNote(title: "整体思考", content: "综合结论",
                                                             annotationIDs: [annotation.id]))
         XCTAssertEqual(store.data.summaryNotes.first?.annotationIDs, [annotation.id])
+        let markdownURL = try XCTUnwrap(store.summaryNoteURL(for: summary))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: markdownURL.path))
+        XCTAssertTrue(try String(contentsOf: markdownURL, encoding: .utf8).hasPrefix("# 整体思考\n\n综合结论"))
+
+        store.updateSummaryNote(summary.id, title: "整体思考 2", content: "公式：$$x^2$$",
+                                annotationIDs: [annotation.id])
+        XCTAssertTrue(try String(contentsOf: markdownURL, encoding: .utf8).contains("$$x^2$$"))
 
         store.deleteAnnotation(annotation.id)
 
         XCTAssertTrue(store.data.summaryNotes.first(where: { $0.id == summary.id })?.annotationIDs.isEmpty == true)
+    }
+
+    func testLegacySummaryNoteMigratesToARealMarkdownFile() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let id = UUID()
+        let json = """
+        {"version":3,"documents":[],"topics":[],"documentTopics":[],"annotations":[],"conversations":[],"topicSummaries":[],"summaryNotes":[{"id":"\(id.uuidString)","title":"旧笔记","content":"旧正文 $x^2$","annotationIDs":[],"createdAt":"2026-07-20T00:00:00Z","updatedAt":"2026-07-20T00:00:00Z"}]}
+        """
+        try json.write(to: root.appendingPathComponent("knowledge.json"), atomically: true, encoding: .utf8)
+
+        let store = KnowledgeStore(rootURL: root)
+        let note = try XCTUnwrap(store.data.summaryNotes.first)
+        let url = try XCTUnwrap(store.summaryNoteURL(for: note))
+
+        XCTAssertEqual(note.storedPath, "source/notes/\(id.uuidString).md")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+        XCTAssertEqual(store.summaryNoteContent(for: note), "旧正文 $x^2$")
+    }
+
+    func testDocumentExporterPreservesOriginalAndWritesPortableAnnotations() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let source = root.appendingPathComponent("source.pdf")
+        let annotated = root.appendingPathComponent("annotated.pdf")
+        let originalCopy = root.appendingPathComponent("original.pdf")
+        var mediaBox = CGRect(x: 0, y: 0, width: 300, height: 400)
+        let consumer = try XCTUnwrap(CGDataConsumer(url: source as CFURL))
+        let context = try XCTUnwrap(CGContext(consumer: consumer, mediaBox: &mediaBox, nil))
+        context.beginPDFPage(nil)
+        context.setFillColor(NSColor.white.cgColor)
+        context.fill(mediaBox)
+        context.endPDFPage()
+        context.closePDF()
+        let originalData = try Data(contentsOf: source)
+        let item = KnowledgeAnnotation(documentId: UUID(), page: 1, quote: "选区", kind: "note",
+                                       note: "这是批注", rects: [AnnotationRect(page: 1, x: 40, y: 100,
+                                                                                 width: 80, height: 18)])
+        let document = KnowledgeDocument(name: "source.pdf", extensionName: ".pdf", size: Int64(originalData.count),
+                                         sha256: "hash", storedPath: nil)
+
+        try DocumentExporter.exportOriginal(from: source, to: originalCopy)
+        try DocumentExporter.exportAnnotated(document: document, source: source, annotations: [item], to: annotated)
+
+        XCTAssertEqual(try Data(contentsOf: originalCopy), originalData)
+        XCTAssertEqual(try Data(contentsOf: source), originalData)
+        let output = try XCTUnwrap(PDFDocument(url: annotated))
+        let annotations = try XCTUnwrap(output.page(at: 0)).annotations
+        let exportedAnnotations = annotations.filter { $0.userName == "知屿" }
+        XCTAssertEqual(exportedAnnotations.count, 2)
+        XCTAssertTrue(exportedAnnotations.contains { $0.contents == "这是批注" && $0.bounds.minX >= 120 })
+    }
+
+    func testTextAnnotatedExportIncludesQuoteAndNote() {
+        let markdown = DocumentExporter.annotatedMarkdown(
+            sourceText: "# 原文", title: "资料",
+            annotations: [KnowledgeAnnotation(documentId: UUID(), page: nil, quote: "关键原文",
+                                              kind: "highlight", note: "我的判断")]
+        )
+        XCTAssertTrue(markdown.contains("# 原文"))
+        XCTAssertTrue(markdown.contains("> 关键原文"))
+        XCTAssertTrue(markdown.contains("**笔记：** 我的判断"))
+    }
+
+    func testInteractivePDFUsesHighlightOnlyAndLeavesBubbleToTheClickableOverlay() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let source = root.appendingPathComponent("source.pdf")
+        var mediaBox = CGRect(x: 0, y: 0, width: 300, height: 400)
+        let consumer = try XCTUnwrap(CGDataConsumer(url: source as CFURL))
+        let context = try XCTUnwrap(CGContext(consumer: consumer, mediaBox: &mediaBox, nil))
+        context.beginPDFPage(nil)
+        context.endPDFPage()
+        context.closePDF()
+        let pdf = try XCTUnwrap(PDFDocument(url: source))
+        let item = KnowledgeAnnotation(documentId: UUID(), page: 1, quote: "选区", kind: "note",
+                                       note: "这是批注", rects: [AnnotationRect(page: 1, x: 40, y: 100,
+                                                                                 width: 80, height: 18)])
+
+        PDFKnowledgeAnnotationRenderer.render([item], in: pdf, interactive: true)
+
+        let appAnnotations = try XCTUnwrap(pdf.page(at: 0)).annotations.filter {
+            KnowledgeAnnotationReference.id(fromPDFContents: $0.contents) == item.id
+        }
+        XCTAssertEqual(appAnnotations.count, 1)
+        XCTAssertEqual(appAnnotations.first?.type, "Highlight")
     }
 
     func testNewConversationDefaultsToPureChatWithoutCurrentDocument() throws {

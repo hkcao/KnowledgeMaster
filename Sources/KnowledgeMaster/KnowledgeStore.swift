@@ -44,6 +44,7 @@ final class KnowledgeStore: ObservableObject {
     var sourceURL: URL { rootURL.appendingPathComponent("source", isDirectory: true) }
     var documentsURL: URL { sourceURL.appendingPathComponent("documents", isDirectory: true) }
     var indexURL: URL { sourceURL.appendingPathComponent("index", isDirectory: true) }
+    var notesURL: URL { sourceURL.appendingPathComponent("notes", isDirectory: true) }
     var metadataURL: URL { rootURL.appendingPathComponent("knowledge.json") }
 
     func generatedDirectory(for conversationID: UUID) -> URL {
@@ -99,7 +100,8 @@ final class KnowledgeStore: ObservableObject {
     }
 
     func prepareDirectories() throws {
-        for url in [rootURL, documentsURL, indexURL, sourceURL.appendingPathComponent("downloads"), sourceURL.appendingPathComponent("generated")] {
+        for url in [rootURL, documentsURL, indexURL, notesURL,
+                    sourceURL.appendingPathComponent("downloads"), sourceURL.appendingPathComponent("generated")] {
             try manager.createDirectory(at: url, withIntermediateDirectories: true)
         }
     }
@@ -110,7 +112,8 @@ final class KnowledgeStore: ObservableObject {
             return
         }
         data = try decoder.decode(KnowledgeData.self, from: Data(contentsOf: metadataURL))
-        data.version = 3
+        data.version = 4
+        if try migrateSummaryNotesToMarkdown() { try save() }
     }
 
     func save() throws {
@@ -298,8 +301,12 @@ final class KnowledgeStore: ObservableObject {
         let value = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return nil }
         let validIDs = Set(data.annotations.map(\.id))
-        let note = SummaryNote(title: value, content: content.trimmingCharacters(in: .whitespacesAndNewlines),
+        let body = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        var note = SummaryNote(title: value, content: body,
                                annotationIDs: annotationIDs.filter { validIDs.contains($0) })
+        note.storedPath = "source/notes/\(note.id.uuidString).md"
+        do { try writeSummaryNote(note, title: value, content: body) }
+        catch { lastError = "无法创建 Markdown 笔记：\(error.localizedDescription)"; return nil }
         data.summaryNotes.insert(note, at: 0)
         try? save()
         return note
@@ -310,16 +317,100 @@ final class KnowledgeStore: ObservableObject {
         let value = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return }
         let validIDs = Set(data.annotations.map(\.id))
+        let body = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        do { try writeSummaryNote(data.summaryNotes[index], title: value, content: body) }
+        catch { lastError = "无法保存 Markdown 笔记：\(error.localizedDescription)"; return }
         data.summaryNotes[index].title = value
-        data.summaryNotes[index].content = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        data.summaryNotes[index].content = body
+        if data.summaryNotes[index].storedPath == nil {
+            data.summaryNotes[index].storedPath = "source/notes/\(id.uuidString).md"
+        }
         data.summaryNotes[index].annotationIDs = annotationIDs.filter { validIDs.contains($0) }
         data.summaryNotes[index].updatedAt = Date()
         try? save()
     }
 
     func deleteSummaryNote(_ id: UUID) {
+        if let note = data.summaryNotes.first(where: { $0.id == id }), let url = summaryNoteURL(for: note) {
+            try? manager.removeItem(at: url)
+        }
         data.summaryNotes.removeAll { $0.id == id }
         try? save()
+    }
+
+    func summaryNoteMarkdown(for note: SummaryNote) -> String {
+        if let url = summaryNoteURL(for: note), let value = try? String(contentsOf: url, encoding: .utf8) {
+            return value
+        }
+        return Self.summaryNoteMarkdown(title: note.title, content: note.content)
+    }
+
+    func summaryNoteContent(for note: SummaryNote) -> String {
+        Self.parseSummaryNoteMarkdown(summaryNoteMarkdown(for: note), fallbackTitle: note.title).content
+    }
+
+    func summaryNoteURL(for note: SummaryNote) -> URL? {
+        let storedPath = note.storedPath ?? "source/notes/\(note.id.uuidString).md"
+        guard storedPath.hasPrefix("source/notes/") else { return nil }
+        let url = rootURL.appendingPathComponent(storedPath).standardizedFileURL
+        guard url.path.hasPrefix(notesURL.standardizedFileURL.path + "/") else { return nil }
+        return url
+    }
+
+    static func summaryNoteMarkdown(title: String, content: String) -> String {
+        "# \(title.trimmingCharacters(in: .whitespacesAndNewlines))\n\n" +
+            content.trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
+    }
+
+    static func parseSummaryNoteMarkdown(_ markdown: String, fallbackTitle: String) -> (title: String, content: String) {
+        var lines = markdown.components(separatedBy: .newlines)
+        let firstNonempty = lines.firstIndex { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        guard let index = firstNonempty else { return (fallbackTitle, "") }
+        let first = lines[index].trimmingCharacters(in: .whitespaces)
+        guard first.hasPrefix("# ") else {
+            return (fallbackTitle, markdown.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        let title = String(first.dropFirst(2)).trimmingCharacters(in: .whitespacesAndNewlines)
+        lines.removeSubrange(0...index)
+        return (title.isEmpty ? fallbackTitle : title,
+                lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    private func writeSummaryNote(_ note: SummaryNote, title: String, content: String) throws {
+        let path = note.storedPath ?? "source/notes/\(note.id.uuidString).md"
+        let target = rootURL.appendingPathComponent(path).standardizedFileURL
+        guard target.path.hasPrefix(notesURL.standardizedFileURL.path + "/") else {
+            throw CocoaError(.fileWriteInvalidFileName)
+        }
+        try manager.createDirectory(at: notesURL, withIntermediateDirectories: true)
+        try Self.summaryNoteMarkdown(title: title, content: content)
+            .write(to: target, atomically: true, encoding: .utf8)
+    }
+
+    private func migrateSummaryNotesToMarkdown() throws -> Bool {
+        var changed = false
+        for index in data.summaryNotes.indices {
+            let expected = "source/notes/\(data.summaryNotes[index].id.uuidString).md"
+            if data.summaryNotes[index].storedPath == nil {
+                data.summaryNotes[index].storedPath = expected
+                changed = true
+            }
+            guard let url = summaryNoteURL(for: data.summaryNotes[index]) else { continue }
+            if manager.fileExists(atPath: url.path) {
+                if let markdown = try? String(contentsOf: url, encoding: .utf8) {
+                    let parsed = Self.parseSummaryNoteMarkdown(markdown, fallbackTitle: data.summaryNotes[index].title)
+                    if data.summaryNotes[index].title != parsed.title || data.summaryNotes[index].content != parsed.content {
+                        data.summaryNotes[index].title = parsed.title
+                        data.summaryNotes[index].content = parsed.content
+                        changed = true
+                    }
+                }
+            } else {
+                try writeSummaryNote(data.summaryNotes[index], title: data.summaryNotes[index].title,
+                                     content: data.summaryNotes[index].content)
+            }
+        }
+        return changed
     }
 
     func recommendTopics(for document: KnowledgeDocument) -> [TopicRecommendation] {

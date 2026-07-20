@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 enum SelectionToolbarLayout {
     static let width: CGFloat = 410
@@ -24,31 +25,32 @@ struct ReaderView: View {
     @State private var noteText = ""
     @State private var noteSelection: ReaderSelection?
     @State private var editingAnnotation: KnowledgeAnnotation?
-    @State private var showNoteEditor = false
+    @State private var showNewNoteEditor = false
     @State private var showAnnotations = false
+    @State private var exportError: String?
 
     var body: some View {
         VStack(spacing: 0) {
             if let document {
                 header(document)
                 Divider()
-                HStack(spacing: 0) {
-                    reader(document)
-                        .overlay {
-                            GeometryReader { geometry in
-                                selectionBar(document, in: geometry.size)
-                            }
+                reader(document)
+                    .overlay {
+                        GeometryReader { geometry in
+                            selectionBar(document, in: geometry.size)
                         }
-                    Divider()
-                    annotationRail(document)
-                }
+                    }
             } else {
                 ContentUnavailableView("选择一份资料", systemImage: "doc.text.magnifyingglass",
                                        description: Text("导入或从左侧打开 PDF、HTML、Markdown 和文本文件。"))
             }
         }
-        .sheet(isPresented: $showNoteEditor) { noteEditor }
+        .sheet(item: $editingAnnotation) { annotation in noteEditor(annotation) }
+        .sheet(isPresented: $showNewNoteEditor) { noteEditor(nil) }
         .sheet(isPresented: $showAnnotations) { annotationList }
+        .alert("导出失败", isPresented: Binding(get: { exportError != nil }, set: { if !$0 { exportError = nil } })) {
+            Button("好") { exportError = nil }
+        } message: { Text(exportError ?? "") }
         .onChange(of: focusedAnnotationID) { _, id in
             if let id { openAnnotation(id) }
         }
@@ -63,6 +65,13 @@ struct ReaderView: View {
                 Text(metadata(document)).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
+            Menu {
+                Button("导出原文档…", systemImage: "doc.badge.arrow.up") { exportOriginal(document) }
+                Button("导出带批注版本…", systemImage: "highlighter") { exportAnnotated(document) }
+                    .disabled(store.annotations(for: document.id).isEmpty)
+            } label: {
+                Label("导出", systemImage: "square.and.arrow.up")
+            }.menuStyle(.borderlessButton)
             Button("批注 \(store.annotations(for: document.id).count)") { showAnnotations = true }
         }
         .padding(.horizontal, 14).frame(height: 58)
@@ -82,33 +91,6 @@ struct ReaderView: View {
         }
     }
 
-    private func annotationRail(_ document: KnowledgeDocument) -> some View {
-        let annotations = store.annotations(for: document.id).sorted {
-            ($0.page ?? Int.max, $0.createdAt) < ($1.page ?? Int.max, $1.createdAt)
-        }
-        return VStack(spacing: 8) {
-            ScrollView {
-                LazyVStack(spacing: 9) {
-                    ForEach(annotations) { annotation in
-                        Button { openAnnotation(annotation.id) } label: {
-                            Image(systemName: annotation.note.isEmpty ? "text.bubble" : "text.bubble.fill")
-                                .font(.system(size: 16))
-                                .foregroundStyle(annotation.kind == "note" ? .green : .orange)
-                                .frame(width: 30, height: 28)
-                                .background(focusedAnnotationID == annotation.id ? Color.accentColor.opacity(0.16) : .clear,
-                                            in: RoundedRectangle(cornerRadius: 7))
-                        }
-                        .buttonStyle(.plain)
-                        .help(annotationHelp(annotation))
-                    }
-                }.padding(.vertical, 10)
-            }.scrollIndicators(.hidden)
-        }
-        .frame(width: 44)
-        .frame(maxHeight: .infinity, alignment: .top)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.65))
-    }
-
     @ViewBuilder private func selectionBar(_ document: KnowledgeDocument, in size: CGSize) -> some View {
         if let selection {
             let position = SelectionToolbarLayout.position(anchorX: selection.anchorX, anchorY: selection.anchorY, in: size)
@@ -119,7 +101,7 @@ struct ReaderView: View {
                 Button("高亮") { addAnnotation(document, selection, kind: "highlight") }
                 Button("划线") { addAnnotation(document, selection, kind: "underline") }
                 Button("笔记", systemImage: "note.text.badge.plus") {
-                    noteText = ""; noteSelection = selection; editingAnnotation = nil; showNoteEditor = true
+                    noteText = ""; noteSelection = selection; editingAnnotation = nil; showNewNoteEditor = true
                 }
             }
             .buttonStyle(.borderless)
@@ -131,17 +113,17 @@ struct ReaderView: View {
         }
     }
 
-    private var noteEditor: some View {
+    private func noteEditor(_ annotation: KnowledgeAnnotation?) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(editingAnnotation == nil ? "添加笔记" : "编辑笔记").font(.title2.bold())
-            Text(editingAnnotation?.quote ?? noteSelection?.text ?? "")
+            Text(annotation == nil ? "添加笔记" : "编辑笔记").font(.title2.bold())
+            Text(annotation?.quote ?? noteSelection?.text ?? "")
                 .font(.callout).foregroundStyle(.secondary).padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading).background(.quaternary, in: RoundedRectangle(cornerRadius: 7))
             TextEditor(text: $noteText).font(.body).frame(minHeight: 150).border(.separator)
             HStack {
                 Spacer()
-                Button("取消") { showNoteEditor = false }
-                Button("保存") { saveNote() }.buttonStyle(.borderedProminent).disabled(noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button("取消") { closeNoteEditor(annotation) }
+                Button("保存") { saveNote(annotation) }.buttonStyle(.borderedProminent).disabled(noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
         .padding(22).frame(width: 520)
@@ -160,7 +142,10 @@ struct ReaderView: View {
                         if !annotation.note.isEmpty { Text(annotation.note).font(.callout).foregroundStyle(.secondary) }
                         HStack {
                             Button(annotation.note.isEmpty ? "添加笔记" : "编辑笔记") {
-                                editingAnnotation = annotation; noteSelection = nil; noteText = annotation.note; showNoteEditor = true
+                                showAnnotations = false
+                                noteSelection = nil
+                                noteText = annotation.note
+                                DispatchQueue.main.async { editingAnnotation = annotation }
                             }
                             Button("删除", role: .destructive) { store.deleteAnnotation(annotation.id) }
                         }.buttonStyle(.borderless)
@@ -182,14 +167,19 @@ struct ReaderView: View {
         noteSelection = nil
         noteText = annotation.note
         selection = nil
-        showNoteEditor = true
+        editingAnnotation = annotation
     }
 
-    private func saveNote() {
+    private func closeNoteEditor(_ annotation: KnowledgeAnnotation?) {
+        if annotation == nil { showNewNoteEditor = false }
+        else { editingAnnotation = nil }
+    }
+
+    private func saveNote(_ annotation: KnowledgeAnnotation?) {
         let value = noteText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let editingAnnotation { store.updateAnnotation(editingAnnotation.id, note: value) }
+        if let annotation { store.updateAnnotation(annotation.id, note: value) }
         else if let document, let noteSelection { _ = store.addAnnotation(documentID: document.id, selection: noteSelection, kind: "note", note: value) }
-        showNoteEditor = false
+        closeNoteEditor(annotation)
         selection = nil
     }
 
@@ -200,6 +190,27 @@ struct ReaderView: View {
         onAsk(ReaderQuote(text: selection.text, documentId: document.id, documentName: document.displayTitle,
                           page: selection.page, imagePNG: imagePNG))
         self.selection = nil
+    }
+
+    private func exportOriginal(_ document: KnowledgeDocument) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = document.name
+        panel.allowedContentTypes = [UTType(filenameExtension: document.extensionName.trimmingCharacters(in: CharacterSet(charactersIn: "."))) ?? .data]
+        guard panel.runModal() == .OK, let destination = panel.url else { return }
+        do { try DocumentExporter.exportOriginal(from: store.storedURL(for: document), to: destination) }
+        catch { exportError = error.localizedDescription }
+    }
+
+    private func exportAnnotated(_ document: KnowledgeDocument) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = DocumentExporter.annotatedFilename(for: document)
+        let ext = URL(fileURLWithPath: panel.nameFieldStringValue).pathExtension
+        panel.allowedContentTypes = [UTType(filenameExtension: ext) ?? .data]
+        guard panel.runModal() == .OK, let destination = panel.url else { return }
+        do {
+            try DocumentExporter.exportAnnotated(document: document, source: store.storedURL(for: document),
+                                                 annotations: store.annotations(for: document.id), to: destination)
+        } catch { exportError = error.localizedDescription }
     }
 
     private func attributedContent(_ document: KnowledgeDocument) -> NSAttributedString {
@@ -232,9 +243,4 @@ struct ReaderView: View {
     }
     private func icon(for ext: String) -> String { ext == ".pdf" ? "doc.richtext" : ext.contains("md") ? "text.document" : "doc.text" }
     private func kindName(_ kind: String) -> String { kind == "highlight" ? "高亮" : kind == "underline" ? "划线" : "笔记" }
-    private func annotationHelp(_ annotation: KnowledgeAnnotation) -> String {
-        let page = annotation.page.map { "第 \($0) 页 · " } ?? ""
-        let detail = annotation.note.isEmpty ? annotation.quote : annotation.note
-        return page + String(detail.prefix(180))
-    }
 }
