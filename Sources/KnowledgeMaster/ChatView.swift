@@ -7,6 +7,30 @@ enum ChatComposerBehavior {
     }
 }
 
+enum ChatPresentation {
+    static let legacySelectionPrompt = "请结合上下文回答我关于这段内容的问题："
+
+    static func visibleContent(for message: ChatMessage) -> String {
+        guard message.role == "user", message.quote != nil else { return message.content }
+        let content = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard content.hasPrefix(legacySelectionPrompt) else { return message.content }
+        let remainder = String(content.dropFirst(legacySelectionPrompt.count))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return remainder.isEmpty ? "基于已选中区域提问" : remainder
+    }
+
+    static func historyTitle(for conversation: Conversation) -> String {
+        if let firstQuestion = conversation.messages.first(where: { $0.role == "user" }) {
+            return String(visibleContent(for: firstQuestion).prefix(60))
+        }
+        let title = conversation.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard title.hasPrefix(legacySelectionPrompt) else { return conversation.title }
+        let remainder = String(title.dropFirst(legacySelectionPrompt.count))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return remainder.isEmpty ? "基于已选中区域提问" : remainder
+    }
+}
+
 enum ChatScopeResolver {
     static func documentIDs(selected: Set<UUID>, currentDocumentID: UUID?, includeCurrent: Bool,
                             quote: ReaderQuote?) -> [UUID] {
@@ -88,16 +112,16 @@ struct ChatView: View {
             }
             Divider()
             if let quote {
-                HStack(alignment: .top, spacing: 7) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(quote.text).lineLimit(3).font(.caption).foregroundStyle(.secondary)
-                        if quote.imagePNG != nil {
-                            Label("已附 PDF 选区截图", systemImage: "photo")
-                                .font(.caption2).foregroundStyle(.secondary)
-                        }
-                    }
-                    Spacer(); Button { self.quote = nil } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain)
-                }.padding(9).background(.quaternary)
+                HStack(spacing: 7) {
+                    Label("基于已选中区域回答", systemImage: quote.imagePNG == nil ? "text.quote" : "viewfinder")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button { self.quote = nil } label: { Image(systemName: "xmark.circle.fill") }
+                        .buttonStyle(.plain).help("移除选中区域")
+                }
+                .padding(.horizontal, 10).padding(.vertical, 7)
+                .background(.quaternary)
+                .help("\(quote.documentName)\(quote.page.map { " · 第 \($0) 页" } ?? "")")
             }
             if let error { Text(error).font(.caption).foregroundStyle(.red).padding(.horizontal, 10) }
             composer
@@ -164,7 +188,6 @@ struct ChatView: View {
 
     private var composer: some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text("回复").font(.caption.bold()).foregroundStyle(.secondary)
             TextEditor(text: $draft)
                 .font(.body)
                 .frame(minHeight: 52, maxHeight: 110)
@@ -198,7 +221,7 @@ struct ChatView: View {
                   systemImage: message.role == "user" ? "person.crop.circle.fill" : "sparkles")
                 .font(.caption.bold())
                 .foregroundStyle(message.role == "user" ? Color.accentColor : Color.secondary)
-            ChatMarkdownView(markdown: message.content)
+            ChatMarkdownView(markdown: ChatPresentation.visibleContent(for: message))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(9)
                 .background(message.role == "user" ? Color.accentColor.opacity(0.18) : Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 9))
@@ -293,7 +316,7 @@ struct ChatView: View {
                         showHistory = false
                     } label: {
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(item.title).font(.headline)
+                            Text(ChatPresentation.historyTitle(for: item)).font(.headline)
                             Text("\(item.messages.count) 条消息 · \(item.updatedAt.formatted(date: .abbreviated, time: .shortened))")
                                 .font(.caption).foregroundStyle(.secondary)
                             let documentNames = conversationDocumentNames(item)

@@ -105,6 +105,12 @@ struct ChatMarkdownView: View {
     }
 }
 
+enum ChatMarkdownScrollBehavior {
+    static func shouldForwardToParent(deltaX: CGFloat, deltaY: CGFloat) -> Bool {
+        abs(deltaY) >= abs(deltaX) && deltaY != 0
+    }
+}
+
 private struct ChatMarkdownWebView: NSViewRepresentable {
     var markdown: String
     @Binding var height: CGFloat
@@ -114,7 +120,7 @@ private struct ChatMarkdownWebView: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.userContentController.add(context.coordinator, name: "height")
-        let view = WKWebView(frame: .zero, configuration: configuration)
+        let view = ParentScrollingWebView(frame: .zero, configuration: configuration)
         view.navigationDelegate = context.coordinator
         view.setValue(false, forKey: "drawsBackground")
         return view
@@ -130,6 +136,27 @@ private struct ChatMarkdownWebView: NSViewRepresentable {
     static func dismantleNSView(_ view: WKWebView, coordinator: Coordinator) {
         view.configuration.userContentController.removeScriptMessageHandler(forName: "height")
         view.navigationDelegate = nil
+    }
+
+    private final class ParentScrollingWebView: WKWebView {
+        override func scrollWheel(with event: NSEvent) {
+            guard ChatMarkdownScrollBehavior.shouldForwardToParent(
+                deltaX: event.scrollingDeltaX, deltaY: event.scrollingDeltaY
+            ), let parentScrollView = parentScrollView() else {
+                super.scrollWheel(with: event)
+                return
+            }
+            parentScrollView.scrollWheel(with: event)
+        }
+
+        private func parentScrollView() -> NSScrollView? {
+            var ancestor = superview
+            while let view = ancestor {
+                if let scrollView = view as? NSScrollView { return scrollView }
+                ancestor = view.superview
+            }
+            return nil
+        }
     }
 
     final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {

@@ -166,6 +166,25 @@ final class KnowledgeStoreTests: XCTestCase {
         XCTAssertNotNil(ChatMarkdownDocument.resourcesURL)
     }
 
+    func testMarkdownWebViewForwardsVerticalTrackpadScrollingToChat() {
+        XCTAssertTrue(ChatMarkdownScrollBehavior.shouldForwardToParent(deltaX: 0, deltaY: 12))
+        XCTAssertTrue(ChatMarkdownScrollBehavior.shouldForwardToParent(deltaX: 2, deltaY: -8))
+        XCTAssertFalse(ChatMarkdownScrollBehavior.shouldForwardToParent(deltaX: 10, deltaY: 2))
+        XCTAssertFalse(ChatMarkdownScrollBehavior.shouldForwardToParent(deltaX: 0, deltaY: 0))
+    }
+
+    func testLegacyAskAIPromptIsKeptOutOfVisibleConversation() {
+        let quote = ReaderQuote(text: "选中的原文", documentId: UUID(), documentName: "paper.pdf", page: 1)
+        let message = ChatMessage(role: "user",
+                                  content: "请结合上下文回答我关于这段内容的问题：还有哪些相关论文？",
+                                  quote: quote)
+        let conversation = Conversation(title: "请结合上下文回答我关于这段内容的问题：还有哪些相关论文？",
+                                        messages: [message])
+
+        XCTAssertEqual(ChatPresentation.visibleContent(for: message), "还有哪些相关论文？")
+        XCTAssertEqual(ChatPresentation.historyTitle(for: conversation), "还有哪些相关论文？")
+    }
+
     func testReturnSendsAndShiftReturnKeepsNewline() {
         XCTAssertTrue(ChatComposerBehavior.shouldSendOnReturn(shiftPressed: false))
         XCTAssertFalse(ChatComposerBehavior.shouldSendOnReturn(shiftPressed: true))

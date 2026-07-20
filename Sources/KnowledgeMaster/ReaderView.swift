@@ -18,7 +18,7 @@ struct ReaderView: View {
     @EnvironmentObject private var store: KnowledgeStore
     var document: KnowledgeDocument?
     var focusedAnnotationID: UUID?
-    var onAsk: (ReaderQuote, String) -> Void
+    var onAsk: (ReaderQuote) -> Void
 
     @State private var selection: ReaderSelection?
     @State private var noteText = ""
@@ -113,8 +113,8 @@ struct ReaderView: View {
         if let selection {
             let position = SelectionToolbarLayout.position(anchorX: selection.anchorX, anchorY: selection.anchorY, in: size)
             HStack(spacing: 4) {
-                Button("Ask AI", systemImage: "sparkles") { ask(document, selection, prompt: "请结合上下文回答我关于这段内容的问题：") }
-                Button("引用", systemImage: "quote.opening") { ask(document, selection, prompt: "") }
+                Button("Ask AI", systemImage: "sparkles") { ask(document, selection) }
+                Button("引用", systemImage: "quote.opening") { ask(document, selection) }
                 Divider().frame(height: 18)
                 Button("高亮") { addAnnotation(document, selection, kind: "highlight") }
                 Button("划线") { addAnnotation(document, selection, kind: "underline") }
@@ -193,12 +193,12 @@ struct ReaderView: View {
         selection = nil
     }
 
-    private func ask(_ document: KnowledgeDocument, _ selection: ReaderSelection, prompt: String) {
+    private func ask(_ document: KnowledgeDocument, _ selection: ReaderSelection) {
         let imagePNG = document.extensionName == ".pdf"
             ? PDFSelectionSnapshot.render(url: store.storedURL(for: document), selection: selection)
             : nil
         onAsk(ReaderQuote(text: selection.text, documentId: document.id, documentName: document.displayTitle,
-                          page: selection.page, imagePNG: imagePNG), prompt)
+                          page: selection.page, imagePNG: imagePNG))
         self.selection = nil
     }
 

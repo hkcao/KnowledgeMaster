@@ -82,9 +82,8 @@ struct ContentView: View {
             }
             .frame(height: 38)
             .background(.quaternary)
-            ReaderView(document: currentDocument, focusedAnnotationID: focusedAnnotationID) { selectedQuote, prompt in
+            ReaderView(document: currentDocument, focusedAnnotationID: focusedAnnotationID) { selectedQuote in
                 quote = selectedQuote
-                chatDraft = prompt
                 if settings.chatPlacement == .hidden { settings.chatPlacement = .right }
             }
         }
