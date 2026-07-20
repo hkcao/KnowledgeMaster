@@ -398,6 +398,38 @@ struct ReaderQuote: Codable, Hashable {
     var documentId: UUID?
     var documentName: String
     var page: Int?
+    var imagePNG: Data? = nil
+
+    enum CodingKeys: String, CodingKey { case text, documentId, documentName, page }
+
+    init(text: String, documentId: UUID?, documentName: String, page: Int?, imagePNG: Data? = nil) {
+        self.text = text
+        self.documentId = documentId
+        self.documentName = documentName
+        self.page = page
+        self.imagePNG = imagePNG
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        text = try container.decode(String.self, forKey: .text)
+        documentId = try container.decodeIfPresent(UUID.self, forKey: .documentId)
+        documentName = try container.decode(String.self, forKey: .documentName)
+        page = try container.decodeIfPresent(Int.self, forKey: .page)
+        imagePNG = nil
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(text, forKey: .text)
+        try container.encodeIfPresent(documentId, forKey: .documentId)
+        try container.encode(documentName, forKey: .documentName)
+        try container.encodeIfPresent(page, forKey: .page)
+    }
+
+    var withoutTransientImage: ReaderQuote {
+        ReaderQuote(text: text, documentId: documentId, documentName: documentName, page: page)
+    }
 }
 
 struct ContextChunk: Codable, Identifiable, Hashable {

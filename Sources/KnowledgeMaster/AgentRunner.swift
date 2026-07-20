@@ -105,7 +105,8 @@ enum AgentRunner {
         }
     }
 
-    static func prompt(for request: AgentRunRequest, documentFiles: [(UUID, String, String, Bool)]) -> String {
+    static func prompt(for request: AgentRunRequest, documentFiles: [(UUID, String, String, Bool)],
+                       selectionImagePath: String? = nil) -> String {
         let documents = documentFiles.isEmpty
             ? "（本轮没有选择文档）"
             : documentFiles.map { id, path, name, hasCache in
@@ -118,7 +119,10 @@ enum AgentRunner {
         let history = request.history.suffix(12).map {
             "\($0.role == "user" ? "用户" : "助手")：\($0.content)"
         }.joined(separator: "\n\n")
-        let quote = request.quote.map { "来自「\($0.documentName)」的当前引用：\n\($0.text)" } ?? "（无）"
+        let quote = request.quote.map {
+            "来自「\($0.documentName)」的当前引用：\n\($0.text)" +
+            (selectionImagePath.map { "\n对应的 PDF 选区截图：`\($0)`。涉及公式、表格、图片或版式时请同时查看截图。" } ?? "")
+        } ?? "（无）"
         return """
         你是知屿的本地知识库研究助手。请回答最后的用户问题。
 
@@ -177,14 +181,17 @@ enum AgentRunner {
         }
         defer { try? manager.removeItem(at: workspace) }
 
+        let selectionImagePath = try stageSelectionSnapshot(request.quote?.imagePNG,
+                                                            documentsDirectory: documentsDirectory, manager: manager)
         let documentFiles = try stageOriginalDocuments(request.documents, documentsDirectory: documentsDirectory,
                                                        cacheDirectory: cacheDirectory, manager: manager)
         let cachedCount = documentFiles.filter(\.3).count
-        let preparationDetail = cachedCount > 0
+        var preparationDetail = cachedCount > 0
             ? "\(documentFiles.count) 份原始资料 · \(cachedCount) 份已有解析缓存"
             : "\(documentFiles.count) 份原始资料"
+        if selectionImagePath != nil { preparationDetail += " · PDF 选区截图" }
         await publish([AgentTraceEvent(kind: .status, title: "已准备只读资料副本", detail: preparationDetail)])
-        let prompt = prompt(for: request, documentFiles: documentFiles)
+        let prompt = prompt(for: request, documentFiles: documentFiles, selectionImagePath: selectionImagePath)
         try prompt.write(to: promptURL, atomically: true, encoding: .utf8)
         manager.createFile(atPath: stdoutURL.path, contents: nil)
         manager.createFile(atPath: stderrURL.path, contents: nil)
@@ -302,6 +309,18 @@ enum AgentRunner {
         try manager.setAttributes([.posixPermissions: 0o555], ofItemAtPath: documentsDirectory.path)
         try manager.setAttributes([.posixPermissions: 0o555], ofItemAtPath: cacheDirectory.path)
         return manifest
+    }
+
+    static func stageSelectionSnapshot(_ imagePNG: Data?, documentsDirectory: URL,
+                                       manager: FileManager = .default) throws -> String? {
+        guard let imagePNG, !imagePNG.isEmpty else { return nil }
+        let directory = documentsDirectory.appendingPathComponent("_selection", isDirectory: true)
+        try manager.createDirectory(at: directory, withIntermediateDirectories: true)
+        let destination = directory.appendingPathComponent("selection.png")
+        try imagePNG.write(to: destination, options: .atomic)
+        try manager.setAttributes([.posixPermissions: 0o444], ofItemAtPath: destination.path)
+        try manager.setAttributes([.posixPermissions: 0o555], ofItemAtPath: directory.path)
+        return "../documents/_selection/selection.png"
     }
 
     static func syncGeneratedFiles(from generatedDirectory: URL, documents: [AgentSourceDocument],

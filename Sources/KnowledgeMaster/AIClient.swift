@@ -7,6 +7,48 @@ enum AIClient {
         var temperature: Double = 0.2
     }
 
+    struct VisionRequest: Encodable {
+        var model: String
+        var messages: [VisionMessage]
+        var temperature: Double = 0.2
+    }
+
+    struct VisionMessage: Encodable {
+        struct Part: Encodable {
+            struct ImageURL: Encodable { var url: String }
+            var type: String
+            var text: String?
+            var imageURL: ImageURL?
+
+            enum CodingKeys: String, CodingKey {
+                case type, text
+                case imageURL = "image_url"
+            }
+        }
+
+        var role: String
+        var content: Content
+
+        enum Content: Encodable {
+            case text(String)
+            case image(text: String, data: Data)
+
+            func encode(to encoder: Encoder) throws {
+                var container = encoder.singleValueContainer()
+                switch self {
+                case .text(let value):
+                    try container.encode(value)
+                case .image(let text, let data):
+                    try container.encode([
+                        Part(type: "text", text: text, imageURL: nil),
+                        Part(type: "image_url", text: nil,
+                             imageURL: .init(url: "data:image/png;base64,\(data.base64EncodedString())"))
+                    ])
+                }
+            }
+        }
+    }
+
     struct Message: Codable, Hashable {
         var role: String
         var content: String
@@ -97,6 +139,34 @@ enum AIClient {
         }
     }
 
+    struct ReActVisionRequest: Encodable {
+        var model: String
+        var messages: [ReActVisionMessage]
+        var tools: [ToolDefinition]
+        var toolChoice = "auto"
+        var temperature: Double = 0.2
+
+        enum CodingKeys: String, CodingKey {
+            case model, messages, tools, temperature
+            case toolChoice = "tool_choice"
+        }
+    }
+
+    struct ReActVisionMessage: Encodable {
+        var role: String
+        var content: VisionMessage.Content?
+        var reasoningContent: String?
+        var toolCalls: [ToolCall]?
+        var toolCallID: String?
+
+        enum CodingKeys: String, CodingKey {
+            case role, content
+            case reasoningContent = "reasoning_content"
+            case toolCalls = "tool_calls"
+            case toolCallID = "tool_call_id"
+        }
+    }
+
     struct ReActResponse: Decodable {
         struct Choice: Decodable { var message: ReActMessage }
         var choices: [Choice]
@@ -142,8 +212,16 @@ enum AIClient {
         ))
     ]
 
-    static func completion(settings: AppSettings, messages: [Message]) async throws -> String {
-        let data = try await perform(settings: settings, body: Request(model: await settings.model, messages: messages))
+    static func completion(settings: AppSettings, messages: [Message], imagePNG: Data? = nil) async throws -> String {
+        let data: Data
+        if let imagePNG {
+            data = try await perform(settings: settings, body: VisionRequest(
+                model: await settings.model,
+                messages: visionMessages(from: messages, imagePNG: imagePNG)
+            ))
+        } else {
+            data = try await perform(settings: settings, body: Request(model: await settings.model, messages: messages))
+        }
         guard let answer = try JSONDecoder().decode(Response.self, from: data).choices.first?.message.content else {
             throw AIError.emptyResponse
         }
@@ -151,12 +229,21 @@ enum AIClient {
     }
 
     static func reactCompletion(settings: AppSettings, messages: [Message], workspace: KnowledgeFileTools,
-                                maxSteps: Int = 8) async throws -> ReActResult {
+                                imagePNG: Data? = nil, maxSteps: Int = 8) async throws -> ReActResult {
         var transcript = messages.map { ReActMessage(role: $0.role, content: $0.content) }
         let model = await settings.model
-        for _ in 0..<max(1, maxSteps) {
-            let body = ReActRequest(model: model, messages: transcript, tools: toolDefinitions)
-            let data = try await perform(settings: settings, body: body)
+        for step in 0..<max(1, maxSteps) {
+            let data: Data
+            if step == 0, let imagePNG {
+                data = try await perform(settings: settings, body: ReActVisionRequest(
+                    model: model,
+                    messages: reactVisionMessages(from: transcript, imagePNG: imagePNG),
+                    tools: toolDefinitions
+                ))
+            } else {
+                data = try await perform(settings: settings,
+                                         body: ReActRequest(model: model, messages: transcript, tools: toolDefinitions))
+            }
             guard let assistant = try JSONDecoder().decode(ReActResponse.self, from: data).choices.first?.message else {
                 throw AIError.emptyResponse
             }
@@ -174,6 +261,28 @@ enum AIClient {
             throw AIError.emptyResponse
         }
         throw AIError.maxToolSteps
+    }
+
+    static func visionMessages(from messages: [Message], imagePNG: Data) -> [VisionMessage] {
+        guard let target = messages.lastIndex(where: { $0.role == "user" }) else {
+            return messages.map { VisionMessage(role: $0.role, content: .text($0.content)) }
+        }
+        return messages.enumerated().map { index, message in
+            VisionMessage(role: message.role,
+                          content: index == target ? .image(text: message.content, data: imagePNG) : .text(message.content))
+        }
+    }
+
+    private static func reactVisionMessages(from messages: [ReActMessage], imagePNG: Data) -> [ReActVisionMessage] {
+        let target = messages.lastIndex(where: { $0.role == "user" })
+        return messages.enumerated().map { index, message in
+            let content = message.content.map { value in
+                index == target ? VisionMessage.Content.image(text: value, data: imagePNG) : .text(value)
+            }
+            return ReActVisionMessage(role: message.role, content: content,
+                                      reasoningContent: message.reasoningContent, toolCalls: message.toolCalls,
+                                      toolCallID: message.toolCallID)
+        }
     }
 
     private static func perform<Body: Encodable>(settings: AppSettings, body: Body) async throws -> Data {

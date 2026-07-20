@@ -165,6 +165,77 @@ final class KnowledgeStoreTests: XCTestCase {
         XCTAssertFalse(ChatComposerBehavior.shouldSendOnReturn(shiftPressed: true))
     }
 
+    func testQuotedSelectionAutomaticallyAuthorizesItsOriginalDocument() {
+        let selected = UUID()
+        let quoted = UUID()
+        let current = UUID()
+        let quote = ReaderQuote(text: "选中文字", documentId: quoted, documentName: "paper.pdf", page: 3)
+
+        let withoutCurrent = ChatScopeResolver.documentIDs(selected: [selected], currentDocumentID: current,
+                                                           includeCurrent: false, quote: quote)
+        XCTAssertEqual(Set(withoutCurrent), Set([selected, quoted]))
+        XCTAssertFalse(withoutCurrent.contains(current))
+    }
+
+    func testReaderQuoteImageIsTransientAndNotSavedInConversationHistory() throws {
+        let quote = ReaderQuote(text: "公式", documentId: UUID(), documentName: "paper.pdf", page: 2,
+                                imagePNG: Data([1, 2, 3]))
+        let encoded = try JSONEncoder().encode(quote)
+        XCTAssertFalse(String(decoding: encoded, as: UTF8.self).contains("AQID"))
+        XCTAssertNil(try JSONDecoder().decode(ReaderQuote.self, from: encoded).imagePNG)
+    }
+
+    func testOpenAICompatibleVisionMessageIncludesTextAndPNGDataURL() throws {
+        let messages = [
+            AIClient.Message(role: "system", content: "system"),
+            AIClient.Message(role: "user", content: "解释这个公式")
+        ]
+        let body = AIClient.VisionRequest(model: "vision-model",
+                                          messages: AIClient.visionMessages(from: messages,
+                                                                           imagePNG: Data([0x89, 0x50, 0x4E, 0x47])))
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(body)) as? [String: Any])
+        let encodedMessages = try XCTUnwrap(object["messages"] as? [[String: Any]])
+        XCTAssertEqual(encodedMessages.first?["content"] as? String, "system")
+        let parts = try XCTUnwrap(encodedMessages.last?["content"] as? [[String: Any]])
+        XCTAssertEqual(parts.first?["text"] as? String, "解释这个公式")
+        let image = try XCTUnwrap(parts.last?["image_url"] as? [String: Any])
+        XCTAssertTrue((image["url"] as? String)?.hasPrefix("data:image/png;base64,") == true)
+    }
+
+    func testPDFSelectionSnapshotCropAddsPaddingAndStaysInsidePage() throws {
+        let page = CGRect(x: 0, y: 0, width: 600, height: 800)
+        let crop = try XCTUnwrap(PDFSelectionSnapshot.cropBounds(
+            rects: [CGRect(x: 10, y: 20, width: 100, height: 30), CGRect(x: 120, y: 20, width: 80, height: 30)],
+            pageBounds: page,
+            padding: 18
+        ))
+        XCTAssertEqual(crop.minX, 0, accuracy: 0.01)
+        XCTAssertEqual(crop.minY, 2, accuracy: 0.01)
+        XCTAssertEqual(crop.maxX, 218, accuracy: 0.01)
+    }
+
+    func testPDFSelectionSnapshotRendersARealPNG() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).pdf")
+        var mediaBox = CGRect(x: 0, y: 0, width: 300, height: 400)
+        let consumer = try XCTUnwrap(CGDataConsumer(url: url as CFURL))
+        let context = try XCTUnwrap(CGContext(consumer: consumer, mediaBox: &mediaBox, nil))
+        context.beginPDFPage(nil)
+        context.setFillColor(CGColor(red: 0.1, green: 0.3, blue: 0.8, alpha: 1))
+        context.fill(CGRect(x: 40, y: 100, width: 120, height: 50))
+        context.endPDFPage()
+        context.closePDF()
+
+        let image = PDFSelectionSnapshot.render(
+            url: url,
+            selection: ReaderSelection(text: "diagram", page: 1,
+                                       rects: [AnnotationRect(page: 1, x: 40, y: 100, width: 120, height: 50)])
+        )
+
+        let data = try XCTUnwrap(image)
+        XCTAssertEqual(Array(data.prefix(8)), [137, 80, 78, 71, 13, 10, 26, 10])
+        XCTAssertGreaterThan(data.count, 100)
+    }
+
     func testAnnotationReferencesRoundTripForPDFAndRichTextClicks() {
         let id = UUID()
         XCTAssertEqual(KnowledgeAnnotationReference.id(fromPDFContents: KnowledgeAnnotationReference.pdfContents(for: id)), id)
@@ -279,6 +350,20 @@ final class KnowledgeStoreTests: XCTestCase {
         let staged = cache.appendingPathComponent(id.uuidString).appendingPathComponent("_app/extracted.json")
         XCTAssertTrue(manifest.first?.3 == true)
         XCTAssertEqual(try String(contentsOf: staged, encoding: .utf8), #"{"text":"already parsed","pages":[]}"#)
+    }
+
+    func testAgentStagesSelectionSnapshotAsReadOnlyContext() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let documents = root.appendingPathComponent("documents")
+        try FileManager.default.createDirectory(at: documents, withIntermediateDirectories: true)
+
+        let path = try AgentRunner.stageSelectionSnapshot(Data([1, 2, 3]), documentsDirectory: documents)
+        let staged = documents.appendingPathComponent("_selection/selection.png")
+
+        XCTAssertEqual(path, "../documents/_selection/selection.png")
+        XCTAssertEqual(try Data(contentsOf: staged), Data([1, 2, 3]))
+        XCTAssertEqual((try FileManager.default.attributesOfItem(atPath: staged.path)[.posixPermissions] as? NSNumber)?.intValue,
+                       0o444)
     }
 
     func testAgentRejectsASymbolicLinkAsAnOriginalDocument() throws {

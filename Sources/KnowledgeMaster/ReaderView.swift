@@ -194,7 +194,11 @@ struct ReaderView: View {
     }
 
     private func ask(_ document: KnowledgeDocument, _ selection: ReaderSelection, prompt: String) {
-        onAsk(ReaderQuote(text: selection.text, documentId: document.id, documentName: document.displayTitle, page: selection.page), prompt)
+        let imagePNG = document.extensionName == ".pdf"
+            ? PDFSelectionSnapshot.render(url: store.storedURL(for: document), selection: selection)
+            : nil
+        onAsk(ReaderQuote(text: selection.text, documentId: document.id, documentName: document.displayTitle,
+                          page: selection.page, imagePNG: imagePNG), prompt)
         self.selection = nil
     }
 

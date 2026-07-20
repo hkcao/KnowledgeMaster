@@ -9,6 +9,7 @@ final class AppSettings: ObservableObject {
     @Published var chatBackend: ChatBackend { didSet { save() } }
     @Published var chatPlacement: ChatPlacement { didSet { save() } }
     @Published var apiContextMode: APIContextMode { didSet { save() } }
+    @Published var visionEnabled: Bool { didSet { save() } }
     @Published private(set) var apiKey: String
     private let defaults: UserDefaults
 
@@ -20,6 +21,7 @@ final class AppSettings: ObservableObject {
         chatBackend = ChatBackend(rawValue: defaults.string(forKey: "chatBackend") ?? "") ?? .direct
         chatPlacement = ChatPlacement(rawValue: defaults.string(forKey: "chatPlacement") ?? "") ?? .right
         apiContextMode = APIContextMode(rawValue: defaults.string(forKey: "apiContextMode") ?? "") ?? .relevantFragments
+        visionEnabled = defaults.object(forKey: "visionEnabled") as? Bool ?? false
         apiKey = apiKeyLoader() ?? ""
     }
 
@@ -51,6 +53,7 @@ final class AppSettings: ObservableObject {
         defaults.set(chatBackend.rawValue, forKey: "chatBackend")
         defaults.set(chatPlacement.rawValue, forKey: "chatPlacement")
         defaults.set(apiContextMode.rawValue, forKey: "apiContextMode")
+        defaults.set(visionEnabled, forKey: "visionEnabled")
     }
 }
 

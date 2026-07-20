@@ -11,6 +11,15 @@ enum ChatComposerBehavior {
     static func shouldSendOnReturn(shiftPressed: Bool) -> Bool { !shiftPressed }
 }
 
+enum ChatScopeResolver {
+    static func documentIDs(selected: Set<UUID>, currentDocumentID: UUID?, includeCurrent: Bool,
+                            quote: ReaderQuote?) -> [UUID] {
+        let current = includeCurrent ? [currentDocumentID].compactMap { $0 } : []
+        let quoted = [quote?.documentId].compactMap { $0 }
+        return Array(Set(Array(selected) + current + quoted))
+    }
+}
+
 struct ChatView: View {
     @EnvironmentObject private var store: KnowledgeStore
     @EnvironmentObject private var settings: AppSettings
@@ -78,8 +87,14 @@ struct ChatView: View {
             }
             Divider()
             if let quote {
-                HStack(alignment: .top) {
-                    Text(quote.text).lineLimit(3).font(.caption).foregroundStyle(.secondary)
+                HStack(alignment: .top, spacing: 7) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(quote.text).lineLimit(3).font(.caption).foregroundStyle(.secondary)
+                        if quote.imagePNG != nil {
+                            Label("已附 PDF 选区截图", systemImage: "photo")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
                     Spacer(); Button { self.quote = nil } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain)
                 }.padding(9).background(.quaternary)
             }
@@ -310,19 +325,21 @@ struct ChatView: View {
         let question = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !question.isEmpty else { return }
         sending = true; error = nil; draft = ""
-        let user = ChatMessage(role: "user", content: question, quote: quote)
+        let activeQuote = quote
+        let user = ChatMessage(role: "user", content: question, quote: activeQuote?.withoutTransientImage)
         conversation.messages.append(user)
         if conversation.title == "新对话" { conversation.title = String(question.prefix(26)) }
-        let currentIDs = includeCurrent ? [currentDocument?.id].compactMap { $0 } : []
-        let documentIDs = Array(Set(Array(selectedDocumentIDs) + currentIDs))
-        let hasLocalScope = !documentIDs.isEmpty || !selectedTopicIDs.isEmpty || quote != nil
+        let documentIDs = ChatScopeResolver.documentIDs(selected: selectedDocumentIDs,
+                                                        currentDocumentID: currentDocument?.id,
+                                                        includeCurrent: includeCurrent, quote: activeQuote)
+        let hasLocalScope = !documentIDs.isEmpty || !selectedTopicIDs.isEmpty || activeQuote != nil
         let backend = settings.chatBackend
         activeTraceEvents = []
         activeAgentRunID = nil
         activeAgentBackend = backend == .direct ? nil : backend
         let usesFragmentContext = backend == .direct && settings.apiContextMode == .relevantFragments
         let context = usesFragmentContext
-            ? store.context(query: question + "\n" + (quote?.text ?? ""), documentIDs: documentIDs, topicIDs: Array(selectedTopicIDs))
+            ? store.context(query: question + "\n" + (activeQuote?.text ?? ""), documentIDs: documentIDs, topicIDs: Array(selectedTopicIDs))
             : []
         let annotations = includeAnnotations ? store.annotationContext(query: question, documentIDs: documentIDs, topicIDs: Array(selectedTopicIDs)) : []
         let material = context.map { "[\($0.label)：\($0.documentName)\($0.page.map { "，第 \($0) 页" } ?? "")]\n\($0.text)" }.joined(separator: "\n\n")
@@ -348,7 +365,11 @@ struct ChatView: View {
                         role: "system",
                         content: systemPrompt
                     )] + historyMessages
-                    answer = try await AIClient.completion(settings: settings, messages: messages)
+                    answer = try await AIClient.completion(
+                        settings: settings,
+                        messages: messages,
+                        imagePNG: settings.visionEnabled ? activeQuote?.imagePNG : nil
+                    )
                 } else {
                     let documents = store.agentDocuments(documentIDs: documentIDs, topicIDs: Array(selectedTopicIDs))
                     let workspace = try KnowledgeFileTools(
@@ -366,7 +387,12 @@ struct ChatView: View {
                     用户批注：
                     \(notes)
                     """)] + historyMessages
-                    let result = try await AIClient.reactCompletion(settings: settings, messages: messages, workspace: workspace)
+                    let result = try await AIClient.reactCompletion(
+                        settings: settings,
+                        messages: messages,
+                        workspace: workspace,
+                        imagePNG: settings.visionEnabled ? activeQuote?.imagePNG : nil
+                    )
                     answer = result.answer
                     generatedFiles = result.generatedFiles.map { path in
                         "source/generated/\(conversation.id.uuidString)/\(path.dropFirst("generated/".count))"
@@ -378,7 +404,7 @@ struct ChatView: View {
                 activeAgentRunID = runID
                 let result = try await AgentRunner.answer(backend: backend, request: AgentRunRequest(
                     question: question,
-                    quote: quote,
+                    quote: activeQuote,
                     history: Array(conversation.messages.dropLast().suffix(12)),
                     documents: sourceDocuments,
                     annotations: annotations

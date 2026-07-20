@@ -65,6 +65,9 @@ struct SettingsView: View {
                 }
                 TextField("API Base URL", text: $settings.baseURL)
                 TextField("模型名称", text: $settings.model)
+                Toggle("模型支持图片输入（发送 PDF 划词截图）", isOn: $settings.visionEnabled)
+                Text("仅影响直接 API。Claude Code/Codex 会直接获得只读选区截图；若当前 API 模型不支持视觉输入，请关闭此项。")
+                    .font(.caption).foregroundStyle(.secondary)
                 SecureField(settings.hasAPIKey ? "已保存 API Key，输入可替换" : "API Key", text: $apiKey)
                 HStack {
                     Button("保存 API Key") { saveKey() }.disabled(apiKey.isEmpty)
