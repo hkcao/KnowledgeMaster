@@ -19,10 +19,64 @@ final class KnowledgeStoreTests: XCTestCase {
         XCTAssertEqual(store.importFiles([file]).filter { $0.hasPrefix("已导入") }.count, 1)
         XCTAssertTrue(store.importFiles([file]).first?.hasPrefix("同名丢弃") == true)
         let document = try XCTUnwrap(store.data.documents.first)
+        XCTAssertEqual(store.storedURL(for: document).deletingLastPathComponent().standardizedFileURL,
+                       store.documentsURL.standardizedFileURL)
+        XCTAssertTrue(store.storedURL(for: document).lastPathComponent.hasPrefix(document.id.uuidString + "--"))
         let annotation = store.addAnnotation(documentID: document.id,
                                              selection: ReaderSelection(text: "知识库", page: nil), kind: "note", note: "重点")
         XCTAssertEqual(store.annotations(for: document.id).first?.id, annotation.id)
         XCTAssertEqual(store.annotationContext(query: "重点", documentIDs: [document.id], topicIDs: []).count, 1)
+    }
+
+    func testDeletingAFlatDocumentDoesNotDeleteItsSiblings() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let input = root.appendingPathComponent("input")
+        try FileManager.default.createDirectory(at: input, withIntermediateDirectories: true)
+        let first = input.appendingPathComponent("first.txt")
+        let second = input.appendingPathComponent("second.txt")
+        try "first".write(to: first, atomically: true, encoding: .utf8)
+        try "second".write(to: second, atomically: true, encoding: .utf8)
+        let store = KnowledgeStore(rootURL: root.appendingPathComponent("library"))
+        _ = store.importFiles([first, second])
+        let documents = store.data.documents
+        XCTAssertEqual(documents.count, 2)
+
+        store.deleteDocument(documents[0].id)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.storedURL(for: documents[0]).path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: store.storedURL(for: documents[1]).path))
+    }
+
+    func testPaperVirtualNameUsesFirstAuthorAndTitle() {
+        XCTAssertEqual(DocumentExtractor.paperDisplayName(
+            title: "Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks",
+            authors: "Patrick Lewis, Ethan Perez, Aleksandra Piktus"
+        ), "Lewis et al., Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks")
+    }
+
+    func testSummaryNotesCanLinkAnnotationsAndCleanDeletedLinks() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let store = KnowledgeStore(rootURL: root)
+        let documentID = UUID()
+        let annotation = store.addAnnotation(documentID: documentID,
+                                             selection: ReaderSelection(text: "关键结论", page: 2), kind: "note", note: "用于总结")
+        let summary = try XCTUnwrap(store.createSummaryNote(title: "整体思考", content: "综合结论",
+                                                            annotationIDs: [annotation.id]))
+        XCTAssertEqual(store.data.summaryNotes.first?.annotationIDs, [annotation.id])
+
+        store.deleteAnnotation(annotation.id)
+
+        XCTAssertTrue(store.data.summaryNotes.first(where: { $0.id == summary.id })?.annotationIDs.isEmpty == true)
+    }
+
+    func testNewConversationDefaultsToPureChatWithoutCurrentDocument() throws {
+        XCTAssertFalse(Conversation().includeCurrentPage)
+        let id = UUID()
+        let oldJSON = """
+        {"id":"\(id.uuidString)","title":"旧对话","messages":[],"summary":"","createdAt":0,"updatedAt":0}
+        """
+        let decoded = try JSONDecoder().decode(Conversation.self, from: Data(oldJSON.utf8))
+        XCTAssertFalse(decoded.includeCurrentPage)
     }
 
     func testMissingMetadataFieldsRemainCompatible() throws {
@@ -146,6 +200,8 @@ final class KnowledgeStoreTests: XCTestCase {
         let codex = AgentRunner.arguments(for: .codex, workDirectory: work,
                                           documentsDirectory: documents, cacheDirectory: cache, answerURL: answer)
         XCTAssertTrue(codex.contains("workspace-write"))
+        XCTAssertTrue(codex.contains("web_search=\"live\""))
+        XCTAssertTrue(codex.contains("tools.web_search=true"))
         XCTAssertTrue(codex.contains("--ephemeral"))
         XCTAssertTrue(codex.contains("--json"))
         XCTAssertFalse(codex.contains("--ignore-user-config"))
@@ -200,6 +256,29 @@ final class KnowledgeStoreTests: XCTestCase {
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: staged.deletingLastPathComponent().path)
         try FileManager.default.removeItem(at: staged)
         XCTAssertEqual(try Data(contentsOf: original), bytes)
+    }
+
+    func testAgentStagesExistingAppExtractionAlongsideGeneratedCache() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let original = root.appendingPathComponent("source.pdf")
+        let baseline = root.appendingPathComponent("index.json")
+        let documents = root.appendingPathComponent("workspace/documents")
+        let cache = root.appendingPathComponent("workspace/cache")
+        try FileManager.default.createDirectory(at: documents, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+        try Data("PDF".utf8).write(to: original)
+        try #"{"text":"already parsed","pages":[]}"#.write(to: baseline, atomically: true, encoding: .utf8)
+        let id = UUID()
+        let source = AgentSourceDocument(id: id, name: "source.pdf", sourceURL: original,
+                                         cacheURL: root.appendingPathComponent("persistent-cache"),
+                                         baselineExtractionURL: baseline)
+
+        let manifest = try AgentRunner.stageOriginalDocuments([source], documentsDirectory: documents,
+                                                               cacheDirectory: cache)
+
+        let staged = cache.appendingPathComponent(id.uuidString).appendingPathComponent("_app/extracted.json")
+        XCTAssertTrue(manifest.first?.3 == true)
+        XCTAssertEqual(try String(contentsOf: staged, encoding: .utf8), #"{"text":"already parsed","pages":[]}"#)
     }
 
     func testAgentRejectsASymbolicLinkAsAnOriginalDocument() throws {
@@ -311,6 +390,15 @@ final class KnowledgeStoreTests: XCTestCase {
         XCTAssertEqual((firstEvents + secondEvents).first(where: { $0.title == "正在调用 Skill" })?.detail, "pdf")
         XCTAssertEqual((firstEvents + secondEvents).last?.kind, .completed)
         XCTAssertEqual(parser.finalAnswer, "最终回答")
+    }
+
+    func testClaudeWebSearchIsVisibleInExecutionTrace() {
+        let update = AgentStreamParser.parse(
+            line: #"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"WebSearch","input":{"query":"today AI news"}}]}}"#,
+            backend: .claudeCode
+        )
+        XCTAssertEqual(update.events.first?.title, "正在联网查询")
+        XCTAssertEqual(update.events.first?.detail, "today AI news")
     }
 
     func testOldChatMessageWithoutBackendRemainsCompatible() throws {

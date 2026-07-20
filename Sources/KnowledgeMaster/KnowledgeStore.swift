@@ -76,6 +76,7 @@ final class KnowledgeStore: ObservableObject {
             return
         }
         data = try decoder.decode(KnowledgeData.self, from: Data(contentsOf: metadataURL))
+        data.version = 3
     }
 
     func save() throws {
@@ -145,15 +146,16 @@ final class KnowledgeStore: ObservableObject {
                     continue
                 }
                 let id = UUID()
-                let relative = "source/documents/\(id.uuidString)/\(source.lastPathComponent)"
+                let storedName = Self.flatStoredFilename(id: id, originalName: source.lastPathComponent)
+                let relative = "source/documents/\(storedName)"
                 let destination = rootURL.appendingPathComponent(relative)
-                try manager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try manager.copyItem(at: source, to: destination)
                 let extracted = try DocumentExtractor.extract(destination)
                 try encoder.encode(extracted).write(to: indexURL.appendingPathComponent("\(id.uuidString).json"), options: .atomic)
+                let displayName = ext == "pdf" ? DocumentExtractor.paperDisplayName(at: destination) : nil
                 let size = (try manager.attributesOfItem(atPath: source.path)[.size] as? NSNumber)?.int64Value ?? 0
                 data.documents.append(KnowledgeDocument(
-                    id: id, name: source.lastPathComponent, extensionName: ".\(ext)", size: size,
+                    id: id, name: source.lastPathComponent, displayName: displayName, extensionName: ".\(ext)", size: size,
                     sha256: digest, storedPath: relative, pageCount: extracted.pages.isEmpty ? nil : extracted.pages.count
                 ))
                 try save()
@@ -167,11 +169,21 @@ final class KnowledgeStore: ObservableObject {
 
     func deleteDocument(_ id: UUID) {
         guard let document = data.documents.first(where: { $0.id == id }) else { return }
-        try? manager.removeItem(at: storedURL(for: document).deletingLastPathComponent())
+        let fileURL = storedURL(for: document)
+        try? manager.removeItem(at: fileURL)
+        let parent = fileURL.deletingLastPathComponent()
+        if parent.deletingLastPathComponent().standardizedFileURL == documentsURL.standardizedFileURL,
+           (try? manager.contentsOfDirectory(atPath: parent.path).isEmpty) == true {
+            try? manager.removeItem(at: parent)
+        }
         try? manager.removeItem(at: indexURL.appendingPathComponent("\(id.uuidString).json"))
         data.documents.removeAll { $0.id == id }
         data.documentTopics.removeAll { $0.documentId == id }
+        let removedAnnotationIDs = Set(data.annotations.filter { $0.documentId == id }.map(\.id))
         data.annotations.removeAll { $0.documentId == id }
+        for index in data.summaryNotes.indices {
+            data.summaryNotes[index].annotationIDs.removeAll { removedAnnotationIDs.contains($0) }
+        }
         for index in data.conversations.indices {
             data.conversations[index].documentIds.removeAll { $0 == id }
             if data.conversations[index].currentDocumentId == id { data.conversations[index].currentDocumentId = nil }
@@ -208,7 +220,7 @@ final class KnowledgeStore: ObservableObject {
         guard !terms.isEmpty else { return documents(for: topicID) }
         return documents(for: topicID).filter { document in
             let text = extractedContent(for: document.id).text.lowercased()
-            let name = document.name.lowercased()
+            let name = (document.name + "\n" + document.displayTitle).lowercased()
             return terms.contains { text.contains($0) || name.contains($0) }
         }
     }
@@ -230,6 +242,9 @@ final class KnowledgeStore: ObservableObject {
 
     func deleteAnnotation(_ id: UUID) {
         data.annotations.removeAll { $0.id == id }
+        for index in data.summaryNotes.indices {
+            data.summaryNotes[index].annotationIDs.removeAll { $0 == id }
+        }
         try? save()
     }
 
@@ -237,8 +252,37 @@ final class KnowledgeStore: ObservableObject {
         data.annotations.filter { $0.documentId == documentID }
     }
 
+    @discardableResult
+    func createSummaryNote(title: String, content: String = "", annotationIDs: [UUID] = []) -> SummaryNote? {
+        let value = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return nil }
+        let validIDs = Set(data.annotations.map(\.id))
+        let note = SummaryNote(title: value, content: content.trimmingCharacters(in: .whitespacesAndNewlines),
+                               annotationIDs: annotationIDs.filter { validIDs.contains($0) })
+        data.summaryNotes.insert(note, at: 0)
+        try? save()
+        return note
+    }
+
+    func updateSummaryNote(_ id: UUID, title: String, content: String, annotationIDs: [UUID]) {
+        guard let index = data.summaryNotes.firstIndex(where: { $0.id == id }) else { return }
+        let value = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return }
+        let validIDs = Set(data.annotations.map(\.id))
+        data.summaryNotes[index].title = value
+        data.summaryNotes[index].content = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        data.summaryNotes[index].annotationIDs = annotationIDs.filter { validIDs.contains($0) }
+        data.summaryNotes[index].updatedAt = Date()
+        try? save()
+    }
+
+    func deleteSummaryNote(_ id: UUID) {
+        data.summaryNotes.removeAll { $0.id == id }
+        try? save()
+    }
+
     func recommendTopics(for document: KnowledgeDocument) -> [TopicRecommendation] {
-        let material = (document.name + "\n" + extractedContent(for: document.id).text.prefix(3_000)).lowercased()
+        let material = (document.displayTitle + "\n" + extractedContent(for: document.id).text.prefix(3_000)).lowercased()
         let rules: [(String, [String])] = [
             ("RAG与知识库", ["rag", "知识库", "检索增强", "rerank"]),
             ("Agent", ["agent", "智能体", "工具调用"]),
@@ -271,10 +315,10 @@ final class KnowledgeStore: ObservableObject {
         for document in selectedDocuments {
             let extracted = extractedContent(for: document.id)
             if extracted.pages.isEmpty {
-                for chunk in Self.chunks(extracted.text) { candidates.append((Self.score(query, in: chunk, title: document.name), document, nil, chunk)) }
+                for chunk in Self.chunks(extracted.text) { candidates.append((Self.score(query, in: chunk, title: document.displayTitle), document, nil, chunk)) }
             } else {
                 for page in extracted.pages {
-                    for chunk in Self.chunks(page.text) { candidates.append((Self.score(query, in: chunk, title: document.name), document, page.number, chunk)) }
+                    for chunk in Self.chunks(page.text) { candidates.append((Self.score(query, in: chunk, title: document.displayTitle), document, page.number, chunk)) }
                 }
             }
         }
@@ -294,7 +338,7 @@ final class KnowledgeStore: ObservableObject {
         }
         for item in ranked where selected.count < 10 { append(item) }
         return selected.prefix(10).enumerated().map { index, item in
-            ContextChunk(label: "资料\(index + 1)", documentId: item.1.id, documentName: item.1.name, page: item.2, text: item.3)
+            ContextChunk(label: "资料\(index + 1)", documentId: item.1.id, documentName: item.1.displayTitle, page: item.2, text: item.3)
         }
     }
 
@@ -309,7 +353,7 @@ final class KnowledgeStore: ObservableObject {
             } else {
                 content = extracted.pages.map { "## 第 \($0.number) 页\n\n\($0.text)" }.joined(separator: "\n\n")
             }
-            return AgentDocument(id: document.id, name: document.name, content: content)
+            return AgentDocument(id: document.id, name: document.displayTitle, content: content)
         }
     }
 
@@ -320,8 +364,11 @@ final class KnowledgeStore: ObservableObject {
             AgentSourceDocument(
                 id: document.id,
                 name: document.name,
+                displayName: document.displayTitle,
                 sourceURL: storedURL(for: document),
-                cacheURL: agentCacheURL.appendingPathComponent(document.id.uuidString, isDirectory: true)
+                cacheURL: agentCacheURL.appendingPathComponent(document.id.uuidString, isDirectory: true),
+                baselineExtractionURL: manager.fileExists(atPath: indexURL.appendingPathComponent("\(document.id.uuidString).json").path)
+                    ? indexURL.appendingPathComponent("\(document.id.uuidString).json") : nil
             )
         }
     }
@@ -342,6 +389,11 @@ final class KnowledgeStore: ObservableObject {
 
     static func queryTerms(_ query: String) -> [String] {
         query.lowercased().split { $0.isWhitespace || $0.isPunctuation }.map(String.init).filter { !$0.isEmpty }
+    }
+
+    static func flatStoredFilename(id: UUID, originalName: String) -> String {
+        let safeName = originalName.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "_")
+        return "\(id.uuidString)--\(safeName.isEmpty ? "document" : safeName)"
     }
 
     static func score(_ query: String, in text: String, title: String) -> Int {

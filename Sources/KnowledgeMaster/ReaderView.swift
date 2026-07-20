@@ -17,6 +17,7 @@ enum SelectionToolbarLayout {
 struct ReaderView: View {
     @EnvironmentObject private var store: KnowledgeStore
     var document: KnowledgeDocument?
+    var focusedAnnotationID: UUID?
     var onAsk: (ReaderQuote, String) -> Void
 
     @State private var selection: ReaderSelection?
@@ -31,12 +32,16 @@ struct ReaderView: View {
             if let document {
                 header(document)
                 Divider()
-                reader(document)
-                    .overlay {
-                        GeometryReader { geometry in
-                            selectionBar(document, in: geometry.size)
+                HStack(spacing: 0) {
+                    reader(document)
+                        .overlay {
+                            GeometryReader { geometry in
+                                selectionBar(document, in: geometry.size)
+                            }
                         }
-                    }
+                    Divider()
+                    annotationRail(document)
+                }
             } else {
                 ContentUnavailableView("选择一份资料", systemImage: "doc.text.magnifyingglass",
                                        description: Text("导入或从左侧打开 PDF、HTML、Markdown 和文本文件。"))
@@ -44,6 +49,9 @@ struct ReaderView: View {
         }
         .sheet(isPresented: $showNoteEditor) { noteEditor }
         .sheet(isPresented: $showAnnotations) { annotationList }
+        .onChange(of: focusedAnnotationID) { _, id in
+            if let id { openAnnotation(id) }
+        }
     }
 
     private func header(_ document: KnowledgeDocument) -> some View {
@@ -51,7 +59,7 @@ struct ReaderView: View {
             Image(systemName: icon(for: document.extensionName))
                 .foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 2) {
-                Text(document.name).font(.headline).lineLimit(1)
+                Text(document.displayTitle).font(.headline).lineLimit(1)
                 Text(metadata(document)).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
@@ -64,12 +72,41 @@ struct ReaderView: View {
         let annotations = store.annotations(for: document.id)
         if document.extensionName == ".pdf" {
             PDFReaderView(url: store.storedURL(for: document), annotations: annotations,
+                          focusedAnnotationID: focusedAnnotationID,
                           onSelection: { selection = $0 }, onAnnotationClick: openAnnotation)
         } else {
             RichTextReaderView(content: attributedContent(document), annotations: annotations,
+                               focusedAnnotationID: focusedAnnotationID,
                                onSelection: { selection = $0 }, onAnnotationClick: openAnnotation)
                 .background(Color(nsColor: .textBackgroundColor))
         }
+    }
+
+    private func annotationRail(_ document: KnowledgeDocument) -> some View {
+        let annotations = store.annotations(for: document.id).sorted {
+            ($0.page ?? Int.max, $0.createdAt) < ($1.page ?? Int.max, $1.createdAt)
+        }
+        return VStack(spacing: 8) {
+            ScrollView {
+                LazyVStack(spacing: 9) {
+                    ForEach(annotations) { annotation in
+                        Button { openAnnotation(annotation.id) } label: {
+                            Image(systemName: annotation.note.isEmpty ? "text.bubble" : "text.bubble.fill")
+                                .font(.system(size: 16))
+                                .foregroundStyle(annotation.kind == "note" ? .green : .orange)
+                                .frame(width: 30, height: 28)
+                                .background(focusedAnnotationID == annotation.id ? Color.accentColor.opacity(0.16) : .clear,
+                                            in: RoundedRectangle(cornerRadius: 7))
+                        }
+                        .buttonStyle(.plain)
+                        .help(annotationHelp(annotation))
+                    }
+                }.padding(.vertical, 10)
+            }.scrollIndicators(.hidden)
+        }
+        .frame(width: 44)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.65))
     }
 
     @ViewBuilder private func selectionBar(_ document: KnowledgeDocument, in size: CGSize) -> some View {
@@ -157,7 +194,7 @@ struct ReaderView: View {
     }
 
     private func ask(_ document: KnowledgeDocument, _ selection: ReaderSelection, prompt: String) {
-        onAsk(ReaderQuote(text: selection.text, documentId: document.id, documentName: document.name, page: selection.page), prompt)
+        onAsk(ReaderQuote(text: selection.text, documentId: document.id, documentName: document.displayTitle, page: selection.page), prompt)
         self.selection = nil
     }
 
@@ -191,4 +228,9 @@ struct ReaderView: View {
     }
     private func icon(for ext: String) -> String { ext == ".pdf" ? "doc.richtext" : ext.contains("md") ? "text.document" : "doc.text" }
     private func kindName(_ kind: String) -> String { kind == "highlight" ? "高亮" : kind == "underline" ? "划线" : "笔记" }
+    private func annotationHelp(_ annotation: KnowledgeAnnotation) -> String {
+        let page = annotation.page.map { "第 \($0) 页 · " } ?? ""
+        let detail = annotation.note.isEmpty ? annotation.quote : annotation.note
+        return page + String(detail.prefix(180))
+    }
 }

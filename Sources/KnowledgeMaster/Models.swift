@@ -62,31 +62,34 @@ enum APIContextMode: String, Codable, CaseIterable, Identifiable {
 }
 
 struct KnowledgeData: Codable {
-    var version: Int = 2
+    var version: Int = 3
     var documents: [KnowledgeDocument] = []
     var topics: [Topic] = []
     var documentTopics: [DocumentTopic] = []
     var annotations: [KnowledgeAnnotation] = []
     var conversations: [Conversation] = []
     var topicSummaries: [TopicSummary] = []
+    var summaryNotes: [SummaryNote] = []
 
     init() {}
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        version = try container.decodeIfPresent(Int.self, forKey: .version) ?? 2
+        version = try container.decodeIfPresent(Int.self, forKey: .version) ?? 3
         documents = try container.decodeIfPresent([KnowledgeDocument].self, forKey: .documents) ?? []
         topics = try container.decodeIfPresent([Topic].self, forKey: .topics) ?? []
         documentTopics = try container.decodeIfPresent([DocumentTopic].self, forKey: .documentTopics) ?? []
         annotations = try container.decodeIfPresent([KnowledgeAnnotation].self, forKey: .annotations) ?? []
         conversations = try container.decodeIfPresent([Conversation].self, forKey: .conversations) ?? []
         topicSummaries = try container.decodeIfPresent([TopicSummary].self, forKey: .topicSummaries) ?? []
+        summaryNotes = try container.decodeIfPresent([SummaryNote].self, forKey: .summaryNotes) ?? []
     }
 }
 
 struct KnowledgeDocument: Codable, Identifiable, Hashable {
     var id: UUID
     var name: String
+    var displayName: String?
     var extensionName: String
     var size: Int64
     var sha256: String
@@ -97,14 +100,15 @@ struct KnowledgeDocument: Codable, Identifiable, Hashable {
     var error: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, size, sha256, storedPath, importedAt, status, pageCount, error
+        case id, name, displayName, size, sha256, storedPath, importedAt, status, pageCount, error
         case extensionName = "extension"
     }
 
-    init(id: UUID = UUID(), name: String, extensionName: String, size: Int64, sha256: String,
+    init(id: UUID = UUID(), name: String, displayName: String? = nil, extensionName: String, size: Int64, sha256: String,
          storedPath: String?, importedAt: Date = Date(), status: String = "ready", pageCount: Int? = nil) {
         self.id = id
         self.name = name
+        self.displayName = displayName
         self.extensionName = extensionName
         self.size = size
         self.sha256 = sha256
@@ -112,6 +116,11 @@ struct KnowledgeDocument: Codable, Identifiable, Hashable {
         self.importedAt = importedAt
         self.status = status
         self.pageCount = pageCount
+    }
+
+    var displayTitle: String {
+        let value = displayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return value.isEmpty ? name : value
     }
 }
 
@@ -276,7 +285,7 @@ struct Conversation: Codable, Identifiable, Hashable {
     var updatedAt: Date
 
     init(id: UUID = UUID(), title: String = "新对话", documentIds: [UUID] = [], topicIds: [UUID] = [],
-         includeCurrentPage: Bool = true, includeAnnotations: Bool = true, currentDocumentId: UUID? = nil,
+         includeCurrentPage: Bool = false, includeAnnotations: Bool = true, currentDocumentId: UUID? = nil,
          messages: [ChatMessage] = [], summary: String = "", createdAt: Date = Date(), updatedAt: Date = Date()) {
         self.id = id
         self.title = title
@@ -302,7 +311,7 @@ struct Conversation: Codable, Identifiable, Hashable {
         title = try c.decodeIfPresent(String.self, forKey: .title) ?? "新对话"
         documentIds = try c.decodeIfPresent([UUID].self, forKey: .documentIds) ?? []
         topicIds = try c.decodeIfPresent([UUID].self, forKey: .topicIds) ?? []
-        includeCurrentPage = try c.decodeIfPresent(Bool.self, forKey: .includeCurrentPage) ?? true
+        includeCurrentPage = try c.decodeIfPresent(Bool.self, forKey: .includeCurrentPage) ?? false
         includeAnnotations = try c.decodeIfPresent(Bool.self, forKey: .includeAnnotations) ?? true
         currentDocumentId = try c.decodeIfPresent(UUID.self, forKey: .currentDocumentId)
         messages = try c.decodeIfPresent([ChatMessage].self, forKey: .messages) ?? []
@@ -316,6 +325,25 @@ struct TopicSummary: Codable, Hashable {
     var topicId: UUID
     var summary: String
     var updatedAt: Date
+}
+
+struct SummaryNote: Codable, Identifiable, Hashable {
+    var id: UUID
+    var title: String
+    var content: String
+    var annotationIDs: [UUID]
+    var createdAt: Date
+    var updatedAt: Date
+
+    init(id: UUID = UUID(), title: String, content: String = "", annotationIDs: [UUID] = [],
+         createdAt: Date = Date(), updatedAt: Date = Date()) {
+        self.id = id
+        self.title = title
+        self.content = content
+        self.annotationIDs = annotationIDs
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
 }
 
 struct ExtractedPage: Codable, Hashable {
@@ -337,8 +365,10 @@ struct AgentDocument: Hashable {
 struct AgentSourceDocument: Hashable {
     var id: UUID
     var name: String
+    var displayName: String? = nil
     var sourceURL: URL
     var cacheURL: URL
+    var baselineExtractionURL: URL? = nil
 }
 
 struct AgentRunRequest: Hashable {

@@ -4,6 +4,7 @@ import AppKit
 struct RichTextReaderView: NSViewRepresentable {
     var content: NSAttributedString
     var annotations: [KnowledgeAnnotation]
+    var focusedAnnotationID: UUID?
     var onSelection: (ReaderSelection?) -> Void
     var onAnnotationClick: (UUID) -> Void
 
@@ -50,12 +51,14 @@ struct RichTextReaderView: NSViewRepresentable {
             value.addAttribute(.link, value: KnowledgeAnnotationReference.link(for: annotation.id), range: range)
         }
         if textView.attributedString() != value { textView.textStorage?.setAttributedString(value) }
+        context.coordinator.focus(annotationID: focusedAnnotationID, annotations: annotations)
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         weak var textView: NSTextView?
         var onSelection: (ReaderSelection?) -> Void
         var onAnnotationClick: (UUID) -> Void
+        private var focusedAnnotationID: UUID?
 
         init(onSelection: @escaping (ReaderSelection?) -> Void, onAnnotationClick: @escaping (UUID) -> Void) {
             self.onSelection = onSelection
@@ -87,6 +90,16 @@ struct RichTextReaderView: NSViewRepresentable {
             guard let id = KnowledgeAnnotationReference.id(fromLink: link) else { return false }
             onAnnotationClick(id)
             return true
+        }
+
+        func focus(annotationID: UUID?, annotations: [KnowledgeAnnotation]) {
+            guard let annotationID, focusedAnnotationID != annotationID,
+                  let annotation = annotations.first(where: { $0.id == annotationID }),
+                  let textView else { return }
+            let range = (textView.string as NSString).range(of: annotation.quote)
+            guard range.location != NSNotFound else { return }
+            focusedAnnotationID = annotationID
+            textView.scrollRangeToVisible(range)
         }
     }
 }

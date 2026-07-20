@@ -21,7 +21,7 @@ struct ChatView: View {
     @State private var conversation = Conversation()
     @State private var selectedDocumentIDs: Set<UUID> = []
     @State private var selectedTopicIDs: Set<UUID> = []
-    @State private var includeCurrent = true
+    @State private var includeCurrent = false
     @State private var includeAnnotations = true
     @State private var sending = false
     @State private var error: String?
@@ -47,8 +47,8 @@ struct ChatView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 12) {
                         if conversation.messages.isEmpty {
-                            ContentUnavailableView("和你的资料聊一聊", systemImage: "bubble.left.and.text.bubble.right",
-                                                   description: Text("选择当前文档、文件或主题作为问答范围。"))
+                            ContentUnavailableView("开始聊天", systemImage: "bubble.left.and.text.bubble.right",
+                                                   description: Text("不选择范围时为纯聊天；需要资料时再选择当前文档、文件或主题。"))
                         }
                         ForEach(conversation.messages) { message in messageView(message).id(message.id) }
                         if !activeTraceEvents.isEmpty {
@@ -107,7 +107,7 @@ struct ChatView: View {
                 Menu("选择范围") {
                     Menu("文件") {
                         ForEach(store.data.documents) { document in
-                            Toggle(document.name, isOn: membership(of: document.id, in: $selectedDocumentIDs))
+                            Toggle(document.displayTitle, isOn: membership(of: document.id, in: $selectedDocumentIDs))
                         }
                     }
                     Menu("主题") {
@@ -121,10 +121,14 @@ struct ChatView: View {
                 Text("已选择 \(selectedDocumentIDs.count) 份文件、\(selectedTopicIDs.count) 个主题，将进行跨文档检索")
                     .font(.caption2).foregroundStyle(.secondary)
             }
+            if selectedDocumentIDs.isEmpty && selectedTopicIDs.isEmpty && !includeCurrent {
+                Text("纯聊天：本轮不会加载本地文档或批注，Agent 可按问题使用网页搜索。")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
             ScrollView(.horizontal) {
                 HStack {
                     ForEach(Array(selectedDocumentIDs), id: \.self) { id in
-                        if let document = store.data.documents.first(where: { $0.id == id }) { chip(document.name) { selectedDocumentIDs.remove(id) } }
+                        if let document = store.data.documents.first(where: { $0.id == id }) { chip(document.displayTitle) { selectedDocumentIDs.remove(id) } }
                     }
                     ForEach(Array(selectedTopicIDs), id: \.self) { id in
                         if let topic = store.data.topics.first(where: { $0.id == id }) { chip(topic.name) { selectedTopicIDs.remove(id) } }
@@ -219,6 +223,7 @@ struct ChatView: View {
 
     private func newChat() {
         conversation = Conversation(); selectedDocumentIDs = []; selectedTopicIDs = []; quote = nil; draft = ""; error = nil
+        includeCurrent = false
         activeTraceEvents = []; activeAgentRunID = nil; activeAgentBackend = nil
     }
 
@@ -310,6 +315,7 @@ struct ChatView: View {
         if conversation.title == "新对话" { conversation.title = String(question.prefix(26)) }
         let currentIDs = includeCurrent ? [currentDocument?.id].compactMap { $0 } : []
         let documentIDs = Array(Set(Array(selectedDocumentIDs) + currentIDs))
+        let hasLocalScope = !documentIDs.isEmpty || !selectedTopicIDs.isEmpty || quote != nil
         let backend = settings.chatBackend
         activeTraceEvents = []
         activeAgentRunID = nil
@@ -335,9 +341,12 @@ struct ChatView: View {
             var traceEvents: [AgentTraceEvent] = []
             if backend == .direct {
                 if settings.apiContextMode == .relevantFragments {
+                    let systemPrompt = hasLocalScope
+                        ? "你是个人知识库助手。仅依据提供的相关片段与用户明确引用回答；资料不足时明确说明。用户笔记是用户观点，不要误称为原文事实。\n\n相关片段：\n\(material)\n\n用户批注：\n\(notes)"
+                        : "你是知屿的通用 AI 助手。本轮用户没有选择任何本地文档、主题、批注或引用，请进行普通对话，不要声称读取了本地知识库。"
                     let messages = [AIClient.Message(
                         role: "system",
-                        content: "你是个人知识库助手。仅依据提供的相关片段回答；资料不足时明确说明。用户笔记是用户观点，不要误称为原文事实。\n\n相关片段：\n\(material)\n\n用户批注：\n\(notes)"
+                        content: systemPrompt
                     )] + historyMessages
                     answer = try await AIClient.completion(settings: settings, messages: messages)
                 } else {
@@ -380,12 +389,12 @@ struct ChatView: View {
             }
             let annotationSources = annotations.enumerated().compactMap { index, annotation -> ContextChunk? in
                 guard let document = store.data.documents.first(where: { $0.id == annotation.documentId }) else { return nil }
-                return ContextChunk(label: "批注\(index + 1)", documentId: document.id, documentName: document.name, page: annotation.page, text: annotation.note.isEmpty ? annotation.quote : annotation.note)
+                return ContextChunk(label: "批注\(index + 1)", documentId: document.id, documentName: document.displayTitle, page: annotation.page, text: annotation.note.isEmpty ? annotation.quote : annotation.note)
             }
             let documentSources = usesFragmentContext ? context : store.agentSourceDocuments(
                 documentIDs: documentIDs, topicIDs: Array(selectedTopicIDs)
             ).enumerated().map { index, document in
-                ContextChunk(label: "范围\(index + 1)", documentId: document.id, documentName: document.name,
+                ContextChunk(label: "范围\(index + 1)", documentId: document.id, documentName: document.displayName ?? document.name,
                              page: nil, text: "本轮可用原始文档")
             }
             conversation.messages.append(ChatMessage(role: "assistant", content: answer, sources: documentSources + annotationSources,

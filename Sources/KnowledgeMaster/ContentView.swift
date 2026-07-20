@@ -8,6 +8,7 @@ struct ContentView: View {
     @State private var tabs: [KnowledgeDocument] = []
     @State private var chatDraft = ""
     @State private var quote: ReaderQuote?
+    @State private var focusedAnnotationID: UUID?
 
     var body: some View {
         GeometryReader { geometry in
@@ -53,7 +54,8 @@ struct ContentView: View {
     }
 
     private var libraryPane: some View {
-        LibraryView(selectedTopicID: $selectedTopicID, currentDocument: $currentDocument, onOpen: open)
+        LibraryView(selectedTopicID: $selectedTopicID, currentDocument: $currentDocument,
+                    onOpen: open, onOpenAnnotation: openAnnotation)
     }
 
     private var chatPane: some View {
@@ -67,7 +69,7 @@ struct ContentView: View {
                     HStack(spacing: 3) {
                         ForEach(tabs) { document in
                             HStack(spacing: 6) {
-                                Button(document.name) { currentDocument = document }.buttonStyle(.plain).lineLimit(1)
+                                Button(document.displayTitle) { currentDocument = document }.buttonStyle(.plain).lineLimit(1)
                                 Button { close(document) } label: { Image(systemName: "xmark").font(.caption2) }.buttonStyle(.plain)
                             }
                             .padding(.horizontal, 9).padding(.vertical, 6)
@@ -80,7 +82,7 @@ struct ContentView: View {
             }
             .frame(height: 38)
             .background(.quaternary)
-            ReaderView(document: currentDocument) { selectedQuote, prompt in
+            ReaderView(document: currentDocument, focusedAnnotationID: focusedAnnotationID) { selectedQuote, prompt in
                 quote = selectedQuote
                 chatDraft = prompt
                 if settings.chatPlacement == .hidden { settings.chatPlacement = .right }
@@ -106,7 +108,16 @@ struct ContentView: View {
 
     private func open(_ document: KnowledgeDocument) {
         currentDocument = document
+        focusedAnnotationID = nil
         if !tabs.contains(where: { $0.id == document.id }) { tabs.append(document) }
+    }
+
+    private func openAnnotation(_ annotation: KnowledgeAnnotation) {
+        guard let document = store.data.documents.first(where: { $0.id == annotation.documentId }) else { return }
+        currentDocument = document
+        if !tabs.contains(where: { $0.id == document.id }) { tabs.append(document) }
+        focusedAnnotationID = nil
+        DispatchQueue.main.async { focusedAnnotationID = annotation.id }
     }
 
     private func close(_ document: KnowledgeDocument) {

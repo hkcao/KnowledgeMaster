@@ -162,6 +162,7 @@ struct AgentStreamParser {
         switch name.lowercased() {
         case "read": return AgentTraceEvent(kind: .file, title: "正在读取文件", detail: detail)
         case "grep", "glob": return AgentTraceEvent(kind: .tool, title: "正在检索资料", detail: detail)
+        case "websearch", "webfetch": return AgentTraceEvent(kind: .tool, title: "正在联网查询", detail: detail)
         case "bash": return AgentTraceEvent(kind: .tool, title: "正在执行命令", detail: detail)
         case "write", "edit": return AgentTraceEvent(kind: .file, title: "正在写入工作区", detail: detail)
         case "skill": return AgentTraceEvent(kind: .tool, title: "正在调用 Skill", detail: detail)

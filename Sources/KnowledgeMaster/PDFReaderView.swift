@@ -19,6 +19,7 @@ private final class InteractivePDFView: PDFView {
 struct PDFReaderView: NSViewRepresentable {
     var url: URL
     var annotations: [KnowledgeAnnotation]
+    var focusedAnnotationID: UUID?
     var onSelection: (ReaderSelection?) -> Void
     var onAnnotationClick: (UUID) -> Void
 
@@ -42,6 +43,7 @@ struct PDFReaderView: NSViewRepresentable {
             view.document = PDFDocument(url: url)
         }
         context.coordinator.render(annotations: annotations, in: view)
+        context.coordinator.focus(annotationID: focusedAnnotationID, annotations: annotations, in: view)
     }
 
     final class Coordinator: NSObject {
@@ -49,6 +51,7 @@ struct PDFReaderView: NSViewRepresentable {
         var url: URL?
         private weak var view: PDFView?
         private var observer: NSObjectProtocol?
+        private var focusedAnnotationID: UUID?
 
         init(onSelection: @escaping (ReaderSelection?) -> Void) { self.onSelection = onSelection }
         deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
@@ -107,6 +110,20 @@ struct PDFReaderView: NSViewRepresentable {
                     annotation.color = item.kind == "note" ? NSColor.systemGreen.withAlphaComponent(0.35) : NSColor.systemYellow.withAlphaComponent(0.45)
                     page.addAnnotation(annotation)
                 }
+            }
+        }
+
+        func focus(annotationID: UUID?, annotations: [KnowledgeAnnotation], in view: PDFView) {
+            guard let annotationID, focusedAnnotationID != annotationID,
+                  let annotation = annotations.first(where: { $0.id == annotationID }),
+                  let document = view.document,
+                  let pageNumber = annotation.page ?? annotation.rects.first?.page,
+                  let page = document.page(at: pageNumber - 1) else { return }
+            focusedAnnotationID = annotationID
+            if let rect = annotation.rects.first(where: { $0.page == pageNumber }) {
+                view.go(to: PDFDestination(page: page, at: CGPoint(x: rect.x, y: rect.y + rect.height + 24)))
+            } else {
+                view.go(to: page)
             }
         }
     }
