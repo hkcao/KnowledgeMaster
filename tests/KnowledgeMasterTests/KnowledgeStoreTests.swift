@@ -154,10 +154,16 @@ final class KnowledgeStoreTests: XCTestCase {
         XCTAssertEqual(files.map(\.lastPathComponent), ["note.md"])
     }
 
-    func testChatMarkdownIsParsedForPreview() {
-        let rendered = ChatMarkdownRenderer.render("## 结论\n\n**重点**与`代码`")
-        XCTAssertEqual(String(rendered.characters), "结论重点与代码")
-        XCTAssertGreaterThan(rendered.runs.count, 1)
+    func testChatMarkdownPreservesBlocksAndRendersLaTeXOffline() {
+        let html = ChatMarkdownDocument.html(markdown: "## 结论\n\n第一行\n第二行\n\n$$x^2$$")
+        XCTAssertTrue(html.contains("marked.parse"))
+        XCTAssertTrue(html.contains("breaks: true"))
+        XCTAssertTrue(html.contains("renderMathInElement"))
+        XCTAssertTrue(html.contains("Content-Security-Policy"))
+        XCTAssertTrue(html.contains("querySelectorAll('script, iframe"))
+        XCTAssertTrue(html.contains("第一行\\n第二行"))
+        XCTAssertGreaterThan(html.count, 200_000)
+        XCTAssertNotNil(ChatMarkdownDocument.resourcesURL)
     }
 
     func testReturnSendsAndShiftReturnKeepsNewline() {
@@ -273,11 +279,25 @@ final class KnowledgeStoreTests: XCTestCase {
         XCTAssertTrue(codex.contains("workspace-write"))
         XCTAssertTrue(codex.contains("web_search=\"live\""))
         XCTAssertTrue(codex.contains("tools.web_search=true"))
+        XCTAssertTrue(codex.contains("features.apps=false"))
+        XCTAssertTrue(codex.contains("features.remote_plugin=false"))
         XCTAssertTrue(codex.contains("--ephemeral"))
         XCTAssertTrue(codex.contains("--json"))
         XCTAssertFalse(codex.contains("--ignore-user-config"))
         XCTAssertFalse(codex.contains("--ignore-rules"))
         XCTAssertFalse(codex.contains("--dangerously-bypass-approvals-and-sandbox"))
+    }
+
+    func testPaperNamingServiceParsesJSONAndRejectsBadExistingNames() throws {
+        let response = "模型结果：```json\n{\"is_paper\":true,\"title\":\"Attention Is All You Need\",\"first_author\":\"Ashish Vaswani\",\"multiple_authors\":true}\n```"
+        let metadata = try XCTUnwrap(PaperNamingService.parse(response))
+        XCTAssertEqual(PaperNamingService.displayName(from: metadata), "Vaswani et al., Attention Is All You Need")
+
+        let document = KnowledgeDocument(name: "paper.pdf",
+                                         displayName: "Published as a conference paper at ICLR 2025",
+                                         extensionName: ".pdf", size: 1, sha256: "abc",
+                                         storedPath: "source/documents/paper.pdf")
+        XCTAssertTrue(PaperNamingService.needsRefinement(document))
     }
 
     func testAgentPromptTreatsDocumentsAsUntrustedData() {

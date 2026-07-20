@@ -23,6 +23,7 @@ private enum LibrarySidebarMode: String, CaseIterable, Identifiable {
 
 struct LibraryView: View {
     @EnvironmentObject private var store: KnowledgeStore
+    @EnvironmentObject private var settings: AppSettings
     @Binding var selectedTopicID: UUID?
     @Binding var currentDocument: KnowledgeDocument?
     var onOpen: (KnowledgeDocument) -> Void
@@ -37,6 +38,7 @@ struct LibraryView: View {
     @State private var showRecommendations = false
     @State private var isDropTarget = false
     @State private var sidebarMode: LibrarySidebarMode = .directory
+    @State private var isRenamingPapers = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -88,7 +90,24 @@ struct LibraryView: View {
             HStack {
                 Button("导入文件", systemImage: "plus") { importFiles() }.buttonStyle(.borderedProminent)
                 Button("导入目录") { importFolder() }
-            }.padding(10)
+                Spacer()
+            }.padding(.horizontal, 10).padding(.top, 10)
+            if store.data.documents.contains(where: PaperNamingService.needsRefinement) {
+                HStack {
+                    if isRenamingPapers {
+                        ProgressView().controlSize(.small)
+                        Text("正在整理论文名…").font(.caption)
+                    } else {
+                        Button("AI 整理论文名", systemImage: "textformat") { Task { await refinePaperNames() } }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .help("AI 整理论文名称（会向已配置模型发送 PDF 第一页文本）")
+                            .disabled(!settings.hasAPIKey)
+                    }
+                    Spacer()
+                    if !settings.hasAPIKey { Text("需先配置 API Key").font(.caption2).foregroundStyle(.secondary) }
+                }.padding(.horizontal, 10).padding(.bottom, 6)
+            }
             HStack { Text("知识目录").font(.caption.bold()).foregroundStyle(.secondary); Spacer(); Button { showNewTopic = true } label: { Image(systemName: "folder.badge.plus") }.buttonStyle(.plain).help("新建主题目录") }
                 .padding(.horizontal, 12)
             if treeNodes.isEmpty {
@@ -235,6 +254,32 @@ struct LibraryView: View {
             store.recommendTopics(for: document).map { "\(document.id.uuidString):\($0.name)" }
         })
         showRecommendations = !recommendedDocuments.isEmpty
+    }
+
+    @MainActor private func refinePaperNames() async {
+        guard settings.hasAPIKey else { importMessage = "请先在设置中配置 API Key"; return }
+        let documents = store.data.documents.filter(PaperNamingService.needsRefinement)
+        guard !documents.isEmpty else { return }
+        isRenamingPapers = true
+        importMessage = "正在用模型整理 \(documents.count) 篇论文名称…"
+        var updated = 0
+        var failures: [String] = []
+        for document in documents {
+            do {
+                if let name = try await PaperNamingService.suggestName(
+                    document: document, extracted: store.extractedContent(for: document.id), settings: settings
+                ), name != document.displayTitle {
+                    store.updateDocumentDisplayName(document.id, displayName: name)
+                    updated += 1
+                }
+            } catch {
+                failures.append(document.name)
+            }
+        }
+        isRenamingPapers = false
+        importMessage = failures.isEmpty
+            ? "已更新 \(updated) 篇论文的虚拟名称"
+            : "已更新 \(updated) 篇；\(failures.count) 篇调用失败"
     }
 
     private var recommendationSheet: some View {

@@ -85,14 +85,18 @@ enum DocumentExtractor {
     private static func cleanMetadata(_ value: String?) -> String? {
         guard let value else { return nil }
         let clean = value.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard clean.count >= 3, clean.localizedCaseInsensitiveCompare("untitled") != .orderedSame else { return nil }
+        let lower = clean.lowercased()
+        guard clean.count >= 3, clean.localizedCaseInsensitiveCompare("untitled") != .orderedSame,
+              !lower.contains("published as"), !lower.contains("conference paper"), !lower.hasPrefix("arxiv:") else { return nil }
         return clean
     }
 
     private static func inferredTitle(from lines: [String]) -> String? {
         guard !lines.isEmpty else { return nil }
         let candidates = lines.prefix(5).filter { line in
-            line.count >= 12 && line.count <= 300 && !line.lowercased().contains("arxiv:") && !line.lowercased().hasPrefix("doi")
+            let lower = line.lowercased()
+            return line.count >= 12 && line.count <= 300 && !lower.contains("arxiv:") && !lower.hasPrefix("doi") &&
+                !lower.contains("published as") && !lower.contains("conference paper")
         }
         return candidates.first
     }

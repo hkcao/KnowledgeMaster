@@ -7,7 +7,7 @@ KnowledgeMaster 是使用 SwiftUI、AppKit 与 PDFKit 编写的原生 macOS 个�
 - 原生 macOS 界面、菜单、设置窗口和多文档标签；知识问答可停靠在右侧、底部、左侧或完全隐藏
 - 通过按钮或从 Finder 拖拽导入 PDF、HTML、Markdown、TXT，也可递归导入目录
 - 原始文件扁平复制到知识库 `source/documents/`（不为每份资料创建子目录），界面仅呈现虚拟视图；旧版目录结构继续兼容
-- 导入论文 PDF 时优先读取 PDF 元数据，将虚拟名称显示为“一作 et al., 论文标题”，原文件名和磁盘内容不变
+- 导入论文 PDF 时优先读取 PDF 元数据，将虚拟名称显示为“一作 et al., 论文标题”；对旧文件名或错误元数据可点击“AI 整理论文名”，只发送第一页文本并仅修改虚拟名称
 - 同名文件默认丢弃，并使用 SHA-256 识别内容重复
 - PDFKit 原稿阅读、原生选区和页码定位
 - HTML 富文本、Markdown 排版预览和纯文本阅读
@@ -20,9 +20,9 @@ KnowledgeMaster 是使用 SwiftUI、AppKit 与 PDFKit 编写的原生 macOS 个�
 - 支持直接调用 DeepSeek、智谱 GLM、自定义 OpenAI 兼容接口，也可调用本机 Claude Code 或 Codex Agent
 - 直接 API 可选“相关片段”或“自主检索”；自主检索使用应用管理的 ReAct 工具循环，具备受限的文件列表、读取、检索和生成文件能力
 - Claude Code / Codex 的工具、文件和状态事件会实时显示在可折叠执行过程面板中；历史对话保留过程记录，但过滤内部推理事件
-- AI 回复直接按 Markdown 排版显示；设置页可检测并测试本机 Agent CLI
+- AI 回复使用应用内置的离线 Markdown 与 KaTeX 预览，保留标题、段落、列表、表格、代码块和换行，并渲染 `$...$`、`$$...$$` 等 LaTeX 公式
 - API Key 保存在 macOS 钥匙串；每次启动只读取一次，切换服务商或模型不会重复请求钥匙串权限
-- 可同时选择多份文件和多个主题进行跨文档问答，并支持对话历史、单次对话摘要和批注上下文；默认不包含当前文档，未选范围时就是不加载本地资料的纯聊天
+- 可同时选择多份文件和多个主题进行跨文档问答，并支持对话历史、单次对话摘要和批注上下文；历史列表会显示每段对话涉及的文档；默认不包含当前文档，未选范围时就是不加载本地资料的纯聊天
 - 设置中切换或迁移知识库目录；选择 iCloud Drive 路径即可由系统同步
 
 ## 开发运行
@@ -85,7 +85,7 @@ release/KnowledgeMaster.app
 Claude Code / Codex Agent 模式不会使用应用预先提取或切块的文本。每轮问答会创建临时隔离目录，并把选中的原格式文件逐字节复制进去；Agent 得到的是 PDF、HTML、Markdown 或 TXT 临时副本，不是真实 `source/documents/` 路径：
 
 - 临时 `documents/` 与已有的 `cache/` 副本设为只读；Agent 只允许把工作结果写到本轮 `work/`。即使 Agent 删除或损坏临时副本，也不会影响知识库原件。
-- Codex 使用 `workspace-write` 沙箱，写权限限制在本轮 `work/`，并使用 `--ephemeral` 临时会话。
+- Codex 使用 `workspace-write` 沙箱，写权限限制在本轮 `work/`，并使用 `--ephemeral` 临时会话；关闭当前问答不需要的 Apps/远程插件目录加载，仍保留用户 Skill 与实时网页搜索。
 - Claude Code 使用非交互模式、默认工具和用户级配置，以便按需调用用户已经安装的 PDF/OCR Skill；它看到的资料路径仍只有临时副本，不会收到知识库原件路径。
 - Agent 可先查看已有解析缓存，再决定是否重新解析。可复用的 OCR、全文解析或结构化结果只有写到 `work/generated/<文档ID>/` 才会被应用同步到 `source/generated/agent-cache/<文档ID>/`，下次运行以只读缓存副本提供。
 - 应用导入 PDF 时生成的基础提取结果也会作为 `cache/<文档ID>/_app/extracted.json` 告知 Agent；Agent 可先复用它，再按版式或 OCR 需要读取原始 PDF。
@@ -97,6 +97,7 @@ Claude Code / Codex Agent 模式不会使用应用预先提取或切块的文本
 - Agent 正常结束、失败或由用户停止后都会清理整份临时目录。
 - Agent 登录、订阅和凭据由对应 CLI 自己管理，知屿不会复制或保存这些凭据。
 - 退出知屿时，所有仍在运行的 Claude Code / Codex 子进程都会收到终止信号；正常完成的每轮调用本来也会立即退出，不保留 Agent 会话。
+- 每条 Agent 消息都会启动一个新的隔离 CLI 进程，不会拉起手机或 GUI 应用。首次模型连接、用户级 Skill/配置加载以及 PDF/OCR 工具执行都可能耗时；这种无会话复用的设计换取了临时资料授权边界清晰，执行过程会持续显示，且没有三分钟固定超时。
 
 ## Claude Code / Codex 接入步骤
 

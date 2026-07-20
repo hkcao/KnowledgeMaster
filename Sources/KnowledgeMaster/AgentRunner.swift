@@ -95,6 +95,8 @@ enum AgentRunner {
                 "--sandbox", "workspace-write",
                 "-c", "web_search=\"live\"",
                 "-c", "tools.web_search=true",
+                "-c", "features.apps=false",
+                "-c", "features.remote_plugin=false",
                 "--ephemeral",
                 "--skip-git-repo-check",
                 "--color", "never",
@@ -252,17 +254,22 @@ enum AgentRunner {
             await publish([AgentTraceEvent(kind: .warning, title: "已由用户停止 \(backend.name)")])
             throw AgentRunnerError.cancelled(backend.name)
         }
-        guard process.terminationStatus == 0 else {
+        let answerFile = (try? String(contentsOf: answerURL, encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let recoveredAnswer = [answerFile, parser.finalAnswer]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
+        if process.terminationStatus != 0, recoveredAnswer == nil {
             let detail = String((stderr.isEmpty ? stdout : stderr).suffix(4_000))
             await publish([AgentTraceEvent(kind: .error, title: "\(backend.name) 执行失败",
                                            detail: detail.isEmpty ? "进程退出码 \(process.terminationStatus)" : String(detail.suffix(600)))])
             throw AgentRunnerError.failed(backend.name, detail.isEmpty ? "进程退出码 \(process.terminationStatus)" : detail)
         }
-        let answerFile = (try? String(contentsOf: answerURL, encoding: .utf8))?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let answer = [answerFile, parser.finalAnswer]
-            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .first { !$0.isEmpty } ?? ""
+        if process.terminationStatus != 0 {
+            await publish([AgentTraceEvent(kind: .warning, title: "Agent 返回答案后异常退出",
+                                           detail: "已保留完整回答；退出码 \(process.terminationStatus)")])
+        }
+        let answer = recoveredAnswer ?? ""
         guard !answer.isEmpty else { throw AgentRunnerError.emptyResponse(backend.name) }
         let generatedFiles = try syncGeneratedFiles(from: generatedDirectory, documents: request.documents, manager: manager)
         if !generatedFiles.isEmpty {

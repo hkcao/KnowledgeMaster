@@ -10,10 +10,12 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "KnowledgeMaster",
+            resources: [.copy("Resources/ChatRenderer")],
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("PDFKit"),
-                .linkedFramework("Security")
+                .linkedFramework("Security"),
+                .linkedFramework("WebKit")
             ]
         ),
         .testTarget(name: "KnowledgeMasterTests", dependencies: ["KnowledgeMaster"])

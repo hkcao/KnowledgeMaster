@@ -191,6 +191,13 @@ final class KnowledgeStore: ObservableObject {
         try? save()
     }
 
+    func updateDocumentDisplayName(_ id: UUID, displayName: String?) {
+        guard let index = data.documents.firstIndex(where: { $0.id == id }) else { return }
+        let value = displayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        data.documents[index].displayName = value?.isEmpty == false ? value : nil
+        try? save()
+    }
+
     func createTopic(_ name: String) {
         let value = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return }

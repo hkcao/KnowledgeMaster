@@ -1,12 +1,6 @@
 import SwiftUI
 import AppKit
 
-enum ChatMarkdownRenderer {
-    static func render(_ value: String) -> AttributedString {
-        (try? AttributedString(markdown: value, options: .init(interpretedSyntax: .full))) ?? AttributedString(value)
-    }
-}
-
 enum ChatComposerBehavior {
     static func shouldSendOnReturn(shiftPressed: Bool) -> Bool { !shiftPressed }
 }
@@ -193,7 +187,9 @@ struct ChatView: View {
                   systemImage: message.role == "user" ? "person.crop.circle.fill" : "sparkles")
                 .font(.caption.bold())
                 .foregroundStyle(message.role == "user" ? Color.accentColor : Color.secondary)
-            Text(ChatMarkdownRenderer.render(message.content)).textSelection(.enabled).padding(9)
+            ChatMarkdownView(markdown: message.content)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(9)
                 .background(message.role == "user" ? Color.accentColor.opacity(0.18) : Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 9))
                 .overlay {
                     RoundedRectangle(cornerRadius: 9)
@@ -272,6 +268,12 @@ struct ChatView: View {
                             Text(item.title).font(.headline)
                             Text("\(item.messages.count) 条消息 · \(item.updatedAt.formatted(date: .abbreviated, time: .shortened))")
                                 .font(.caption).foregroundStyle(.secondary)
+                            let documentNames = conversationDocumentNames(item)
+                            if !documentNames.isEmpty {
+                                Text("涉及：" + documentNames.prefix(4).joined(separator: "、") +
+                                     (documentNames.count > 4 ? " 等 \(documentNames.count) 份" : ""))
+                                    .font(.caption2).foregroundStyle(.tertiary).lineLimit(2)
+                            }
                             if !item.summary.isEmpty { Text(item.summary).font(.caption).lineLimit(2) }
                         }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 4)
                     }.buttonStyle(.plain)
@@ -279,6 +281,26 @@ struct ChatView: View {
             }
             HStack { Spacer(); Button("完成") { showHistory = false } }
         }.padding(20).frame(width: 620, height: 520)
+    }
+
+    private func conversationDocumentNames(_ conversation: Conversation) -> [String] {
+        var result: [String] = []
+        var seen = Set<String>()
+        func append(_ value: String?) {
+            guard let value, !value.isEmpty, seen.insert(value).inserted else { return }
+            result.append(value)
+        }
+        for id in conversation.documentIds {
+            append(store.data.documents.first(where: { $0.id == id })?.displayTitle)
+        }
+        if conversation.includeCurrentPage, let id = conversation.currentDocumentId {
+            append(store.data.documents.first(where: { $0.id == id })?.displayTitle)
+        }
+        for message in conversation.messages {
+            append(message.quote?.documentName)
+            message.sources?.forEach { append($0.documentName) }
+        }
+        return result
     }
 
     private var summarySheet: some View {
