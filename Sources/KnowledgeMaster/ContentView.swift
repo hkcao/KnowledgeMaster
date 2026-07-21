@@ -78,7 +78,6 @@ struct ContentView: View {
                         }
                     }.padding(.horizontal, 7)
                 }.scrollIndicators(.hidden)
-                chatPlacementMenu.padding(.trailing, 8)
             }
             .frame(height: 38)
             .background(.quaternary)
@@ -87,22 +86,6 @@ struct ContentView: View {
                 if settings.chatPlacement == .hidden { settings.chatPlacement = .right }
             }
         }
-    }
-
-    private var chatPlacementMenu: some View {
-        Menu {
-            ForEach(ChatPlacement.allCases) { placement in
-                Button {
-                    settings.chatPlacement = placement
-                } label: {
-                    Label(placement.name, systemImage: placement.icon)
-                }
-            }
-        } label: {
-            Label("知识问答", systemImage: settings.chatPlacement.icon).labelStyle(.iconOnly)
-        }
-        .menuStyle(.borderlessButton)
-        .help("知识问答位置：\(settings.chatPlacement.name)")
     }
 
     private func open(_ document: KnowledgeDocument) {

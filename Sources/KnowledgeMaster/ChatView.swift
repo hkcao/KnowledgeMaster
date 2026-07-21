@@ -78,6 +78,7 @@ struct ChatView: View {
                     .disabled(conversation.messages.isEmpty || sending)
                 Button { showHistory = true } label: { Image(systemName: "clock.arrow.circlepath") }.help("对话历史")
                 Button { newChat() } label: { Image(systemName: "plus") }.help("新对话").disabled(sending)
+                chatPlacementMenu
             }.padding(14).frame(height: 58)
             Divider()
             scope
@@ -135,6 +136,22 @@ struct ChatView: View {
         .sheet(isPresented: $showHistory) { historySheet }
         .sheet(isPresented: $showSummary) { summarySheet }
         .sheet(isPresented: $showAgentImport) { agentImportSheet }
+    }
+
+    private var chatPlacementMenu: some View {
+        Menu {
+            ForEach(ChatPlacement.allCases) { placement in
+                Button {
+                    settings.chatPlacement = placement
+                } label: {
+                    Label(placement.name, systemImage: placement.icon)
+                }
+            }
+        } label: {
+            Label("知识问答位置", systemImage: settings.chatPlacement.icon).labelStyle(.iconOnly)
+        }
+        .menuStyle(.borderlessButton)
+        .help("知识问答位置：\(settings.chatPlacement.name)")
     }
 
     private var scope: some View {

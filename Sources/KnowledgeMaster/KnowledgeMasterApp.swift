@@ -25,6 +25,15 @@ struct KnowledgeMasterApp: App {
                 Button("设置…") { NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil) }
                     .keyboardShortcut(",", modifiers: .command)
             }
+            CommandMenu("知识问答") {
+                ForEach(ChatPlacement.allCases) { placement in
+                    Button {
+                        settings.chatPlacement = placement
+                    } label: {
+                        Label(placement.name, systemImage: placement.icon)
+                    }
+                }
+            }
         }
         Settings {
             SettingsView().environmentObject(store).environmentObject(settings)
