@@ -20,11 +20,11 @@
 
 ### 2. 专注的论文阅读体验
 
-- 使用 PDFKit 阅读 PDF，并直接预览 HTML、Markdown 和纯文本。
+- 使用 PDFKit 阅读 PDF，并直接预览 HTML、Markdown 和纯文本；阅读区支持触控板捏合缩放。
 - 多标签页并行打开文档，适合在相关论文之间来回比较。
 - 可展开文档目录导航，与正文同时显示，快速跳转长论文的章节或页面。
 - 支持鼠标划词、Ask AI、引用，以及“原文 + 选区截图”的多模态上下文。
-- 支持高亮、下划线和批注；批注入口贴近对应正文位置，可跳转和再次编辑。
+- 支持高亮、下划线和批注；批注入口位于对应内容右侧的页面留白，可跳转和再次编辑而不遮挡正文。
 - 可导出原始文档，也可将 PDF 高亮、下划线和批注内容合并后导出。
 
 ### 3. 研究笔记与知识沉淀
@@ -100,7 +100,29 @@ swift test
 open release/KnowledgeMaster.app
 ```
 
-当前构建产物未进行 Developer ID 签名、公证或 DMG 封装。面向其他用户正式分发前仍需完成这些步骤。
+当前构建产物使用 ad-hoc 签名，没有进行 Developer ID 签名或 Apple 公证。
+
+生成未公证的 Apple Silicon DMG 和 SHA-256 校验文件：
+
+```bash
+./scripts/package-release.sh
+```
+
+产物位于 `release/ZhiYu-<版本>-<架构>.dmg`。上传到 GitHub Releases 后，用户可将应用拖入“应用程序”。由于该版本没有 Apple Developer ID 签名和公证，首次打开可能被 Gatekeeper 阻止；用户需要在尝试打开后前往“系统设置 → 隐私与安全性”，确认“仍要打开”。仅应从本仓库的官方 Release 页面下载安装包并核对 SHA-256。
+
+以当前版本为例，确认代码已经进入 `main` 后发布：
+
+```bash
+gh release create v0.1.0 \
+  release/ZhiYu-0.1.0-arm64.dmg \
+  release/ZhiYu-0.1.0-arm64.dmg.sha256 \
+  --repo hkcao/KnowledgeMaster \
+  --target main \
+  --title "知屿 v0.1.0" \
+  --generate-notes
+```
+
+用户授权打开未公证应用的具体步骤参见 [Apple 官方说明](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac)。
 
 ## AI 配置
 

@@ -38,11 +38,12 @@ fileprivate final class AnnotationTextView: NSTextView {
             guard glyphRange.length > 0 else { continue }
             let lastGlyph = NSRange(location: NSMaxRange(glyphRange) - 1, length: 1)
             let glyphRect = layoutManager.boundingRect(forGlyphRange: lastGlyph, in: textContainer)
-            let size: CGFloat = 18
-            let preferredX = textContainerOrigin.x + glyphRect.maxX + 4
-            let x = min(preferredX, max(textContainerOrigin.x, bounds.width - textContainerInset.width - size))
-            let y = textContainerOrigin.y + glyphRect.midY - size / 2
-            button.frame = CGRect(x: x, y: y, width: size, height: size)
+            button.frame = AnnotationBubbleLayout.trailingMarginFrame(
+                alignedTo: textContainerOrigin.y + glyphRect.midY,
+                contentMaxX: bounds.maxX - textContainerInset.width,
+                fallbackRightEdge: bounds.maxX - 8,
+                within: bounds
+            )
         }
     }
 
@@ -66,6 +67,9 @@ struct RichTextReaderView: NSViewRepresentable {
         let scroll = NSScrollView()
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
+        scroll.allowsMagnification = true
+        scroll.minMagnification = 0.5
+        scroll.maxMagnification = 3
         let textView = AnnotationTextView()
         textView.isEditable = false
         textView.isSelectable = true
