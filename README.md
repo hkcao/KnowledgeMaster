@@ -146,3 +146,7 @@ open release/KnowledgeMaster.app
 - 删除文档会影响 `source/` 中的原始文件，界面应明确确认；删除主题只解除虚拟关联，不删除原文。
 
 欢迎通过 Issue 反馈论文阅读、批注、研究笔记和 AI 辅助研究工作流中的实际问题。
+
+## 许可证
+
+本项目采用 [MIT License](LICENSE)。
