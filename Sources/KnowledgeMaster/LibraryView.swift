@@ -134,10 +134,8 @@ struct LibraryView: View {
                             .buttonStyle(.bordered)
                             .controlSize(.small)
                             .help("AI 整理论文名称（会向已配置模型发送 PDF 第一页文本）")
-                            .disabled(!settings.hasAPIKey)
                     }
                     Spacer()
-                    if !settings.hasAPIKey { Text("需先配置 API Key").font(.caption2).foregroundStyle(.secondary) }
                 }.padding(.horizontal, 10).padding(.bottom, 6)
             }
             HStack { Text("知识目录").font(.caption.bold()).foregroundStyle(.secondary); Spacer(); Button { showNewTopic = true } label: { Image(systemName: "folder.badge.plus") }.buttonStyle(.plain).help("新建主题目录") }
@@ -307,7 +305,7 @@ struct LibraryView: View {
     }
 
     @MainActor private func refinePaperNames() async {
-        guard settings.hasAPIKey else { importMessage = "请先在设置中配置 API Key"; return }
+        guard !settings.apiKeyForUse().isEmpty else { importMessage = "请先在设置中配置 API Key"; return }
         let documents = store.data.documents.filter(PaperNamingService.needsRefinement)
         guard !documents.isEmpty else { return }
         isRenamingPapers = true

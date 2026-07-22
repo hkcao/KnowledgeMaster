@@ -292,7 +292,7 @@ struct ChatView: View {
     }
 
     private var backendStatus: String {
-        if settings.chatBackend == .direct { return settings.hasAPIKey ? settings.model : "直接 API · 尚未配置模型" }
+        if settings.chatBackend == .direct { return "\(settings.model) · 直接 API" }
         return AgentRunner.executableURL(for: settings.chatBackend) == nil
             ? "\(settings.chatBackend.name) · 未安装"
             : "\(settings.chatBackend.name) · 本机 Agent"

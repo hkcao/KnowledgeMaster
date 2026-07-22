@@ -286,7 +286,7 @@ enum AIClient {
     }
 
     private static func perform<Body: Encodable>(settings: AppSettings, body: Body) async throws -> Data {
-        let key = await settings.apiKey
+        let key = await settings.apiKeyForUse()
         guard !key.isEmpty else { throw AIError.missingKey }
         let base = await settings.baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let endpoint = base.hasSuffix("/chat/completions") ? base : base + "/chat/completions"

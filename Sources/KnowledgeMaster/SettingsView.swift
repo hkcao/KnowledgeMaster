@@ -68,12 +68,14 @@ struct SettingsView: View {
                 Toggle("模型支持图片输入（发送 PDF 划词截图）", isOn: $settings.visionEnabled)
                 Text("仅影响直接 API。Claude Code/Codex 会直接获得只读选区截图；若当前 API 模型不支持视觉输入，请关闭此项。")
                     .font(.caption).foregroundStyle(.secondary)
-                SecureField(settings.hasAPIKey ? "已保存 API Key，输入可替换" : "API Key", text: $apiKey)
+                SecureField("API Key（输入后可保存或替换）", text: $apiKey)
                 HStack {
                     Button("保存 API Key") { saveKey() }.disabled(apiKey.isEmpty)
-                    Button("清除", role: .destructive) { clearKey() }.disabled(!settings.hasAPIKey)
+                    Button("清除", role: .destructive) { clearKey() }
                     Button("测试连接") { Task { await testConnection() } }
                 }
+                Text("只有在发起直接 API 请求、测试连接或保存/清除时才访问 macOS 钥匙串。")
+                    .font(.caption).foregroundStyle(.secondary)
                 if !status.isEmpty { Text(status).font(.caption).foregroundStyle(.secondary) }
             }
             Section("知识库与 source 目录") {

@@ -11,11 +11,14 @@ final class AppSettings: ObservableObject {
     @Published var libraryVisible: Bool { didSet { save() } }
     @Published var apiContextMode: APIContextMode { didSet { save() } }
     @Published var visionEnabled: Bool { didSet { save() } }
-    @Published private(set) var apiKey: String
     private let defaults: UserDefaults
+    private let apiKeyLoader: () -> String?
+    private var apiKey = ""
+    private var didLoadAPIKey = false
 
-    init(defaults: UserDefaults = .standard, apiKeyLoader: () -> String? = Keychain.read) {
+    init(defaults: UserDefaults = .standard, apiKeyLoader: @escaping () -> String? = Keychain.read) {
         self.defaults = defaults
+        self.apiKeyLoader = apiKeyLoader
         provider = defaults.string(forKey: "provider") ?? "deepseek"
         baseURL = defaults.string(forKey: "baseURL") ?? "https://api.deepseek.com"
         model = defaults.string(forKey: "model") ?? "deepseek-chat"
@@ -24,15 +27,21 @@ final class AppSettings: ObservableObject {
         libraryVisible = defaults.object(forKey: "libraryVisible") as? Bool ?? true
         apiContextMode = APIContextMode(rawValue: defaults.string(forKey: "apiContextMode") ?? "") ?? .relevantFragments
         visionEnabled = defaults.object(forKey: "visionEnabled") as? Bool ?? false
-        apiKey = apiKeyLoader() ?? ""
     }
 
-    var hasAPIKey: Bool { !apiKey.isEmpty }
+    func apiKeyForUse() -> String {
+        if !didLoadAPIKey {
+            apiKey = apiKeyLoader() ?? ""
+            didLoadAPIKey = true
+        }
+        return apiKey
+    }
 
     func setAPIKey(_ value: String) throws {
         if value.isEmpty { try Keychain.delete() }
         else { try Keychain.write(value) }
         apiKey = value
+        didLoadAPIKey = true
     }
 
     func applyDefaults(for provider: String) {

@@ -285,7 +285,7 @@ final class KnowledgeStoreTests: XCTestCase {
         XCTAssertFalse(reloaded.libraryVisible)
     }
 
-    func testAPIKeyIsLoadedOnceAndThenCachedInMemory() {
+    func testAPIKeyIsLoadedOnlyWhenUsedAndThenCachedInMemory() {
         let suiteName = "KnowledgeMasterTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -295,9 +295,9 @@ final class KnowledgeStoreTests: XCTestCase {
             return "cached-key"
         }
 
-        XCTAssertTrue(settings.hasAPIKey)
-        XCTAssertEqual(settings.apiKey, "cached-key")
-        XCTAssertTrue(settings.hasAPIKey)
+        XCTAssertEqual(reads, 0)
+        XCTAssertEqual(settings.apiKeyForUse(), "cached-key")
+        XCTAssertEqual(settings.apiKeyForUse(), "cached-key")
         XCTAssertEqual(reads, 1)
     }
 
