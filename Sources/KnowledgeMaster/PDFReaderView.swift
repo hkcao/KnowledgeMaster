@@ -81,6 +81,7 @@ struct PDFReaderView: NSViewRepresentable {
     var focusedAnnotationID: UUID?
     var navigationRequest: DocumentNavigationRequest?
     var onSelection: (ReaderSelection?) -> Void
+    var onPageChange: (Int) -> Void
     var onAnnotationClick: (UUID) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(onSelection: onSelection) }
@@ -97,6 +98,7 @@ struct PDFReaderView: NSViewRepresentable {
 
     func updateNSView(_ view: PDFView, context: Context) {
         context.coordinator.onSelection = onSelection
+        context.coordinator.onPageChange = onPageChange
         (view as? InteractivePDFView)?.onKnowledgeAnnotationClick = onAnnotationClick
         if context.coordinator.url != url {
             context.coordinator.url = url
@@ -110,20 +112,32 @@ struct PDFReaderView: NSViewRepresentable {
 
     final class Coordinator: NSObject {
         var onSelection: (ReaderSelection?) -> Void
+        var onPageChange: (Int) -> Void = { _ in }
         var url: URL?
         private weak var view: PDFView?
-        private var observer: NSObjectProtocol?
+        private var observers: [NSObjectProtocol] = []
         private var focusedAnnotationID: UUID?
         private var navigationRequestID: UUID?
 
         init(onSelection: @escaping (ReaderSelection?) -> Void) { self.onSelection = onSelection }
-        deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
+        deinit { observers.forEach(NotificationCenter.default.removeObserver) }
 
         func attach(to view: PDFView) {
             self.view = view
-            observer = NotificationCenter.default.addObserver(
+            observers.append(NotificationCenter.default.addObserver(
                 forName: Notification.Name.PDFViewSelectionChanged, object: view, queue: .main
             ) { [weak self] _ in self?.selectionChanged() }
+            )
+            observers.append(NotificationCenter.default.addObserver(
+                forName: Notification.Name.PDFViewPageChanged, object: view, queue: .main
+            ) { [weak self] _ in self?.pageChanged() }
+            )
+        }
+
+        private func pageChanged() {
+            guard let view, let document = view.document, let page = view.currentPage else { return }
+            let index = document.index(for: page)
+            if index != NSNotFound { onPageChange(index) }
         }
 
         private func selectionChanged() {

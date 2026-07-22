@@ -19,6 +19,7 @@ struct ReaderView: View {
     @EnvironmentObject private var store: KnowledgeStore
     var document: KnowledgeDocument?
     var focusedAnnotationID: UUID?
+    var layoutRevision: UUID
     var onAsk: (ReaderQuote) -> Void
 
     @State private var selection: ReaderSelection?
@@ -31,6 +32,7 @@ struct ReaderView: View {
     @State private var showOutline = false
     @State private var outlineEntries: [DocumentOutlineEntry] = []
     @State private var navigationRequest: DocumentNavigationRequest?
+    @State private var currentPDFPageIndex: Int?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -53,6 +55,7 @@ struct ReaderView: View {
         .onChange(of: focusedAnnotationID) { _, id in
             if let id { openAnnotation(id) }
         }
+        .onChange(of: layoutRevision) { _, _ in restorePDFPageAfterLayoutChange() }
     }
 
     private func header(_ document: KnowledgeDocument) -> some View {
@@ -150,7 +153,8 @@ struct ReaderView: View {
         if document.extensionName == ".pdf" {
             PDFReaderView(url: store.storedURL(for: document), annotations: annotations,
                           focusedAnnotationID: focusedAnnotationID, navigationRequest: navigationRequest,
-                          onSelection: { selection = $0 }, onAnnotationClick: openAnnotation)
+                          onSelection: { selection = $0 }, onPageChange: { currentPDFPageIndex = $0 },
+                          onAnnotationClick: openAnnotation)
         } else {
             RichTextReaderView(content: attributedContent(document), annotations: annotations,
                                focusedAnnotationID: focusedAnnotationID, navigationRequest: navigationRequest,
@@ -263,12 +267,20 @@ struct ReaderView: View {
     private func loadOutline(_ document: KnowledgeDocument) {
         selection = nil
         navigationRequest = nil
+        currentPDFPageIndex = nil
         let extracted = store.extractedContent(for: document.id)
         let rendered = attributedContent(document).string
         outlineEntries = DocumentOutlineBuilder.entries(document: document,
                                                         sourceURL: store.storedURL(for: document),
                                                         extracted: extracted,
                                                         renderedText: rendered)
+    }
+
+    private func restorePDFPageAfterLayoutChange() {
+        guard document?.extensionName == ".pdf", let pageIndex = currentPDFPageIndex else { return }
+        DispatchQueue.main.async {
+            navigationRequest = DocumentNavigationRequest(target: .pdf(pageIndex: pageIndex, point: nil))
+        }
     }
 
     private func exportOriginal(_ document: KnowledgeDocument) {

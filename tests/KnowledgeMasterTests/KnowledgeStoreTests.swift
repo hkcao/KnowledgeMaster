@@ -272,6 +272,19 @@ final class KnowledgeStoreTests: XCTestCase {
         XCTAssertEqual(Set(ChatPlacement.allCases), Set([.right, .bottom, .sidebar, .hidden]))
     }
 
+    func testLibrarySidebarVisibilityDefaultsToShownAndPersists() {
+        let suiteName = "KnowledgeMasterTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let settings = AppSettings(defaults: defaults) { nil }
+        XCTAssertTrue(settings.libraryVisible)
+        settings.libraryVisible = false
+
+        let reloaded = AppSettings(defaults: defaults) { nil }
+        XCTAssertFalse(reloaded.libraryVisible)
+    }
+
     func testAPIKeyIsLoadedOnceAndThenCachedInMemory() {
         let suiteName = "KnowledgeMasterTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

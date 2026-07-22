@@ -9,6 +9,8 @@ struct ContentView: View {
     @State private var chatDraft = ""
     @State private var quote: ReaderQuote?
     @State private var focusedAnnotationID: UUID?
+    @State private var lastVisibleChatPlacement: ChatPlacement = .right
+    @State private var readerLayoutRevision = UUID()
 
     var body: some View {
         GeometryReader { geometry in
@@ -19,36 +21,34 @@ struct ContentView: View {
         .alert("知识库错误", isPresented: Binding(get: { store.lastError != nil }, set: { if !$0 { store.lastError = nil } })) {
             Button("好") { store.lastError = nil }
         } message: { Text(store.lastError ?? "") }
+        .onChange(of: settings.chatPlacement) { oldValue, newValue in
+            if oldValue != .hidden && newValue == .hidden { lastVisibleChatPlacement = oldValue }
+            readerLayoutRevision = UUID()
+        }
+        .onChange(of: settings.libraryVisible) { _, _ in readerLayoutRevision = UUID() }
     }
 
-    @ViewBuilder private var layout: some View {
-        switch settings.chatPlacement {
-        case .right:
-            HSplitView {
-                libraryPane.frame(idealWidth: 280, maxHeight: .infinity)
-                readerPane.frame(minWidth: 480, maxHeight: .infinity)
-                chatPane.frame(idealWidth: 380, maxHeight: .infinity)
-            }
-        case .bottom:
-            HSplitView {
-                libraryPane.frame(idealWidth: 280, maxHeight: .infinity)
-                VSplitView {
-                    readerPane.frame(minWidth: 480, minHeight: 320)
-                    chatPane.frame(minWidth: 480, idealHeight: 340)
-                }
-            }
-        case .sidebar:
-            HSplitView {
+    private var layout: some View {
+        HSplitView {
+            if settings.libraryVisible && settings.chatPlacement == .sidebar {
                 VSplitView {
                     libraryPane.frame(minWidth: 300, minHeight: 280)
                     chatPane.frame(minWidth: 320, idealHeight: 400)
-                }.frame(idealWidth: 380)
-                readerPane.frame(minWidth: 520, maxHeight: .infinity)
-            }
-        case .hidden:
-            HSplitView {
+                }
+                .frame(idealWidth: 380)
+            } else if settings.libraryVisible {
                 libraryPane.frame(idealWidth: 280, maxHeight: .infinity)
-                readerPane.frame(minWidth: 560, maxHeight: .infinity)
+            } else if settings.chatPlacement == .sidebar {
+                chatPane.frame(idealWidth: 380, maxHeight: .infinity)
+            }
+            VSplitView {
+                readerPane.frame(minWidth: 480, minHeight: 320, maxHeight: .infinity)
+                if settings.chatPlacement == .bottom {
+                    chatPane.frame(minWidth: 480, idealHeight: 340)
+                }
+            }
+            if settings.chatPlacement == .right {
+                chatPane.frame(idealWidth: 380, maxHeight: .infinity)
             }
         }
     }
@@ -65,6 +65,15 @@ struct ContentView: View {
     private var readerPane: some View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
+                Button {
+                    settings.libraryVisible.toggle()
+                } label: {
+                    Image(systemName: "sidebar.left")
+                }
+                .buttonStyle(.borderless)
+                .fixedSize()
+                .help(settings.libraryVisible ? "隐藏资料侧边栏" : "显示资料侧边栏")
+                Divider().frame(height: 18)
                 ScrollView(.horizontal) {
                     HStack(spacing: 3) {
                         ForEach(tabs) { document in
@@ -77,15 +86,35 @@ struct ContentView: View {
                                         in: RoundedRectangle(cornerRadius: 6))
                         }
                     }.padding(.horizontal, 7)
-                }.scrollIndicators(.hidden)
+                }
+                .scrollIndicators(.hidden)
+                .frame(minWidth: 0, maxWidth: .infinity)
+                if settings.chatPlacement == .hidden {
+                    Divider().frame(height: 18)
+                    Button {
+                        showChat()
+                    } label: {
+                        Label("知识问答", systemImage: "sparkles")
+                    }
+                    .buttonStyle(.borderless)
+                    .fixedSize()
+                    .layoutPriority(1)
+                    .help("恢复知识问答")
+                    .padding(.trailing, 8)
+                }
             }
             .frame(height: 38)
             .background(.quaternary)
-            ReaderView(document: currentDocument, focusedAnnotationID: focusedAnnotationID) { selectedQuote in
+            ReaderView(document: currentDocument, focusedAnnotationID: focusedAnnotationID,
+                       layoutRevision: readerLayoutRevision) { selectedQuote in
                 quote = selectedQuote
-                if settings.chatPlacement == .hidden { settings.chatPlacement = .right }
+                if settings.chatPlacement == .hidden { showChat() }
             }
         }
+    }
+
+    private func showChat() {
+        settings.chatPlacement = lastVisibleChatPlacement == .hidden ? .right : lastVisibleChatPlacement
     }
 
     private func open(_ document: KnowledgeDocument) {

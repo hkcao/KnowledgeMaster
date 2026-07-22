@@ -8,6 +8,7 @@ final class AppSettings: ObservableObject {
     @Published var model: String { didSet { save() } }
     @Published var chatBackend: ChatBackend { didSet { save() } }
     @Published var chatPlacement: ChatPlacement { didSet { save() } }
+    @Published var libraryVisible: Bool { didSet { save() } }
     @Published var apiContextMode: APIContextMode { didSet { save() } }
     @Published var visionEnabled: Bool { didSet { save() } }
     @Published private(set) var apiKey: String
@@ -20,6 +21,7 @@ final class AppSettings: ObservableObject {
         model = defaults.string(forKey: "model") ?? "deepseek-chat"
         chatBackend = ChatBackend(rawValue: defaults.string(forKey: "chatBackend") ?? "") ?? .direct
         chatPlacement = ChatPlacement(rawValue: defaults.string(forKey: "chatPlacement") ?? "") ?? .right
+        libraryVisible = defaults.object(forKey: "libraryVisible") as? Bool ?? true
         apiContextMode = APIContextMode(rawValue: defaults.string(forKey: "apiContextMode") ?? "") ?? .relevantFragments
         visionEnabled = defaults.object(forKey: "visionEnabled") as? Bool ?? false
         apiKey = apiKeyLoader() ?? ""
@@ -52,6 +54,7 @@ final class AppSettings: ObservableObject {
         defaults.set(model, forKey: "model")
         defaults.set(chatBackend.rawValue, forKey: "chatBackend")
         defaults.set(chatPlacement.rawValue, forKey: "chatPlacement")
+        defaults.set(libraryVisible, forKey: "libraryVisible")
         defaults.set(apiContextMode.rawValue, forKey: "apiContextMode")
         defaults.set(visionEnabled, forKey: "visionEnabled")
     }
