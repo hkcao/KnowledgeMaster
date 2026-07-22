@@ -28,18 +28,17 @@ struct ReaderView: View {
     @State private var showNewNoteEditor = false
     @State private var showAnnotations = false
     @State private var exportError: String?
+    @State private var showOutline = false
+    @State private var outlineEntries: [DocumentOutlineEntry] = []
+    @State private var navigationRequest: DocumentNavigationRequest?
 
     var body: some View {
         VStack(spacing: 0) {
             if let document {
                 header(document)
                 Divider()
-                reader(document)
-                    .overlay {
-                        GeometryReader { geometry in
-                            selectionBar(document, in: geometry.size)
-                        }
-                    }
+                readerArea(document)
+                    .task(id: document.id) { loadOutline(document) }
             } else {
                 ContentUnavailableView("选择一份资料", systemImage: "doc.text.magnifyingglass",
                                        description: Text("导入或从左侧打开 PDF、HTML、Markdown 和文本文件。"))
@@ -65,6 +64,13 @@ struct ReaderView: View {
                 Text(metadata(document)).font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
+            Button {
+                showOutline.toggle()
+            } label: {
+                Label("目录", systemImage: "list.bullet.indent")
+            }
+            .buttonStyle(.borderless)
+            .help(showOutline ? "收起文档目录" : "展开文档目录")
             Menu {
                 Button("导出原文档…", systemImage: "doc.badge.arrow.up") { exportOriginal(document) }
                 Button("导出带批注版本…", systemImage: "highlighter") { exportAnnotated(document) }
@@ -77,15 +83,77 @@ struct ReaderView: View {
         .padding(.horizontal, 14).frame(height: 58)
     }
 
+    @ViewBuilder private func readerArea(_ document: KnowledgeDocument) -> some View {
+        if showOutline {
+            HSplitView {
+                outlinePane
+                    .frame(minWidth: 180, idealWidth: 230, maxWidth: 320)
+                documentReader(document)
+                    .frame(minWidth: 360)
+            }
+        } else {
+            documentReader(document)
+        }
+    }
+
+    private func documentReader(_ document: KnowledgeDocument) -> some View {
+        reader(document)
+            .overlay {
+                GeometryReader { geometry in
+                    selectionBar(document, in: geometry.size)
+                }
+            }
+    }
+
+    private var outlinePane: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("文档目录").font(.headline)
+                Spacer()
+                Button { showOutline = false } label: { Image(systemName: "xmark") }
+                    .buttonStyle(.plain)
+                    .help("收起目录")
+            }
+            .padding(.horizontal, 12).frame(height: 42)
+            Divider()
+            if outlineEntries.isEmpty {
+                ContentUnavailableView("未识别到目录", systemImage: "list.bullet.indent",
+                                       description: Text("该文档没有可用的标题结构。"))
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 1) {
+                        ForEach(outlineEntries) { entry in
+                            Button {
+                                navigationRequest = DocumentNavigationRequest(target: entry.target)
+                            } label: {
+                                Text(entry.title)
+                                    .font(entry.level == 1 ? .callout.weight(.semibold) : .callout)
+                                    .lineLimit(2)
+                                    .multilineTextAlignment(.leading)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.leading, CGFloat(max(0, entry.level - 1)) * 12)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 7)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.vertical, 6)
+                }
+            }
+        }
+        .background(Color(nsColor: .controlBackgroundColor))
+    }
+
     @ViewBuilder private func reader(_ document: KnowledgeDocument) -> some View {
         let annotations = store.annotations(for: document.id)
         if document.extensionName == ".pdf" {
             PDFReaderView(url: store.storedURL(for: document), annotations: annotations,
-                          focusedAnnotationID: focusedAnnotationID,
+                          focusedAnnotationID: focusedAnnotationID, navigationRequest: navigationRequest,
                           onSelection: { selection = $0 }, onAnnotationClick: openAnnotation)
         } else {
             RichTextReaderView(content: attributedContent(document), annotations: annotations,
-                               focusedAnnotationID: focusedAnnotationID,
+                               focusedAnnotationID: focusedAnnotationID, navigationRequest: navigationRequest,
                                onSelection: { selection = $0 }, onAnnotationClick: openAnnotation)
                 .background(Color(nsColor: .textBackgroundColor))
         }
@@ -190,6 +258,17 @@ struct ReaderView: View {
         onAsk(ReaderQuote(text: selection.text, documentId: document.id, documentName: document.displayTitle,
                           page: selection.page, imagePNG: imagePNG))
         self.selection = nil
+    }
+
+    private func loadOutline(_ document: KnowledgeDocument) {
+        selection = nil
+        navigationRequest = nil
+        let extracted = store.extractedContent(for: document.id)
+        let rendered = attributedContent(document).string
+        outlineEntries = DocumentOutlineBuilder.entries(document: document,
+                                                        sourceURL: store.storedURL(for: document),
+                                                        extracted: extracted,
+                                                        renderedText: rendered)
     }
 
     private func exportOriginal(_ document: KnowledgeDocument) {

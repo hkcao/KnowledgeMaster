@@ -79,6 +79,7 @@ struct PDFReaderView: NSViewRepresentable {
     var url: URL
     var annotations: [KnowledgeAnnotation]
     var focusedAnnotationID: UUID?
+    var navigationRequest: DocumentNavigationRequest?
     var onSelection: (ReaderSelection?) -> Void
     var onAnnotationClick: (UUID) -> Void
 
@@ -104,6 +105,7 @@ struct PDFReaderView: NSViewRepresentable {
         context.coordinator.render(annotations: annotations, in: view)
         (view as? InteractivePDFView)?.updateAnnotationMarkers(annotations)
         context.coordinator.focus(annotationID: focusedAnnotationID, annotations: annotations, in: view)
+        context.coordinator.navigate(navigationRequest, in: view)
     }
 
     final class Coordinator: NSObject {
@@ -112,6 +114,7 @@ struct PDFReaderView: NSViewRepresentable {
         private weak var view: PDFView?
         private var observer: NSObjectProtocol?
         private var focusedAnnotationID: UUID?
+        private var navigationRequestID: UUID?
 
         init(onSelection: @escaping (ReaderSelection?) -> Void) { self.onSelection = onSelection }
         deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
@@ -157,6 +160,19 @@ struct PDFReaderView: NSViewRepresentable {
             focusedAnnotationID = annotationID
             if let rect = annotation.rects.first(where: { $0.page == pageNumber }) {
                 view.go(to: PDFDestination(page: page, at: CGPoint(x: rect.x, y: rect.y + rect.height + 24)))
+            } else {
+                view.go(to: page)
+            }
+        }
+
+        func navigate(_ request: DocumentNavigationRequest?, in view: PDFView) {
+            guard let request, request.id != navigationRequestID,
+                  case let .pdf(pageIndex, point) = request.target,
+                  let document = view.document,
+                  let page = document.page(at: pageIndex) else { return }
+            navigationRequestID = request.id
+            if let point {
+                view.go(to: PDFDestination(page: page, at: point))
             } else {
                 view.go(to: page)
             }

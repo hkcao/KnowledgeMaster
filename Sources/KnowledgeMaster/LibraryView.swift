@@ -32,6 +32,9 @@ struct LibraryView: View {
     @State private var query = ""
     @State private var showNewTopic = false
     @State private var newTopicName = ""
+    @State private var renamingTopic: Topic?
+    @State private var renameTopicName = ""
+    @State private var deletingTopic: Topic?
     @State private var importMessage = ""
     @State private var recommendedDocuments: [KnowledgeDocument] = []
     @State private var selectedRecommendations: Set<String> = []
@@ -80,6 +83,35 @@ struct LibraryView: View {
             TextField("主题名称", text: $newTopicName)
             Button("创建") { store.createTopic(newTopicName); newTopicName = "" }
             Button("取消", role: .cancel) {}
+        }
+        .alert("重命名主题", isPresented: Binding(
+            get: { renamingTopic != nil },
+            set: { if !$0 { renamingTopic = nil } }
+        )) {
+            TextField("主题名称", text: $renameTopicName)
+            Button("保存") {
+                if let topic = renamingTopic { store.renameTopic(topic.id, name: renameTopicName) }
+                renamingTopic = nil
+            }
+            Button("取消", role: .cancel) { renamingTopic = nil }
+        }
+        .alert("删除虚拟主题？", isPresented: Binding(
+            get: { deletingTopic != nil },
+            set: { if !$0 { deletingTopic = nil } }
+        )) {
+            Button("删除", role: .destructive) {
+                if let topic = deletingTopic {
+                    store.deleteTopic(topic.id)
+                    if let selectedTopicID,
+                       !store.data.topics.contains(where: { $0.id == selectedTopicID }) {
+                        self.selectedTopicID = nil
+                    }
+                }
+                deletingTopic = nil
+            }
+            Button("取消", role: .cancel) { deletingTopic = nil }
+        } message: {
+            Text("将删除“\(deletingTopic?.name ?? "")”、子主题及其虚拟关联，不会删除原始文档、批注或笔记。")
         }
         .sheet(isPresented: $showRecommendations) { recommendationSheet }
     }
@@ -192,6 +224,24 @@ struct LibraryView: View {
                 Text(node.title).lineLimit(1)
                 Spacer()
                 if let subtitle = node.subtitle { Text(subtitle).font(.caption2).foregroundStyle(.secondary) }
+                Menu {
+                    Button("重命名…", systemImage: "pencil") {
+                        guard let topic = store.data.topics.first(where: { $0.id == topicID }) else { return }
+                        renameTopicName = topic.name
+                        renamingTopic = topic
+                    }
+                    Divider()
+                    Button("删除…", systemImage: "trash", role: .destructive) {
+                        deletingTopic = store.data.topics.first(where: { $0.id == topicID })
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .foregroundStyle(.secondary)
+                        .frame(width: 18, height: 18)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("管理主题")
             }
             .contentShape(Rectangle())
             .padding(.vertical, 2)

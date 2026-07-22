@@ -235,10 +235,37 @@ final class KnowledgeStore: ObservableObject {
         try? save()
     }
 
-    func createTopic(_ name: String) {
+    @discardableResult
+    func createTopic(_ name: String, parentID: UUID? = nil) -> Topic? {
         let value = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty else { return }
-        data.topics.append(Topic(name: value))
+        guard !value.isEmpty else { return nil }
+        let topic = Topic(name: value, parentId: parentID)
+        data.topics.append(topic)
+        try? save()
+        return topic
+    }
+
+    func renameTopic(_ id: UUID, name: String) {
+        let value = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty, let index = data.topics.firstIndex(where: { $0.id == id }) else { return }
+        data.topics[index].name = value
+        try? save()
+    }
+
+    func deleteTopic(_ id: UUID) {
+        guard data.topics.contains(where: { $0.id == id }) else { return }
+        var removed: Set<UUID> = [id]
+        var added = true
+        while added {
+            let children = data.topics.filter { topic in
+                topic.parentId.map { removed.contains($0) } ?? false
+            }.map(\.id)
+            let previousCount = removed.count
+            removed.formUnion(children)
+            added = removed.count != previousCount
+        }
+        data.topics.removeAll { removed.contains($0.id) }
+        data.documentTopics.removeAll { removed.contains($0.topicId) }
         try? save()
     }
 

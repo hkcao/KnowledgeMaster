@@ -56,6 +56,7 @@ struct RichTextReaderView: NSViewRepresentable {
     var content: NSAttributedString
     var annotations: [KnowledgeAnnotation]
     var focusedAnnotationID: UUID?
+    var navigationRequest: DocumentNavigationRequest?
     var onSelection: (ReaderSelection?) -> Void
     var onAnnotationClick: (UUID) -> Void
 
@@ -108,6 +109,7 @@ struct RichTextReaderView: NSViewRepresentable {
         if textView.attributedString() != value { textView.textStorage?.setAttributedString(value) }
         textView.updateAnnotationMarkers(markers)
         context.coordinator.focus(annotationID: focusedAnnotationID, annotations: annotations)
+        context.coordinator.navigate(navigationRequest)
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
@@ -115,6 +117,7 @@ struct RichTextReaderView: NSViewRepresentable {
         var onSelection: (ReaderSelection?) -> Void
         var onAnnotationClick: (UUID) -> Void
         private var focusedAnnotationID: UUID?
+        private var navigationRequestID: UUID?
 
         init(onSelection: @escaping (ReaderSelection?) -> Void, onAnnotationClick: @escaping (UUID) -> Void) {
             self.onSelection = onSelection
@@ -156,6 +159,18 @@ struct RichTextReaderView: NSViewRepresentable {
             guard range.location != NSNotFound else { return }
             focusedAnnotationID = annotationID
             textView.scrollRangeToVisible(range)
+        }
+
+        func navigate(_ request: DocumentNavigationRequest?) {
+            guard let request, request.id != navigationRequestID,
+                  case let .text(location) = request.target,
+                  let textView else { return }
+            let length = (textView.string as NSString).length
+            guard length > 0 else { return }
+            navigationRequestID = request.id
+            let safeLocation = min(max(0, location), length - 1)
+            textView.scrollRangeToVisible(NSRange(location: safeLocation, length: 1))
+            textView.setSelectedRange(NSRange(location: safeLocation, length: 0))
         }
     }
 }

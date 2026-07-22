@@ -217,6 +217,57 @@ final class KnowledgeStoreTests: XCTestCase {
         XCTAssertEqual(store.documents(for: topics[1].id).map(\.id), [document.id])
     }
 
+    func testRenamingAndDeletingTopicKeepsOriginalDocumentAndAnnotation() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let input = root.appendingPathComponent("input")
+        try FileManager.default.createDirectory(at: input, withIntermediateDirectories: true)
+        let file = input.appendingPathComponent("protected.md")
+        try "# 原始文档\n不应随虚拟目录删除。".write(to: file, atomically: true, encoding: .utf8)
+        let store = KnowledgeStore(rootURL: root.appendingPathComponent("library"))
+        _ = store.importFiles([file])
+        let document = try XCTUnwrap(store.data.documents.first)
+        let sourceURL = store.storedURL(for: document)
+        let rootTopic = try XCTUnwrap(store.createTopic("旧名称"))
+        let childTopic = try XCTUnwrap(store.createTopic("子主题", parentID: rootTopic.id))
+        store.link(documentID: document.id, topicID: rootTopic.id)
+        store.link(documentID: document.id, topicID: childTopic.id)
+        let annotation = store.addAnnotation(documentID: document.id,
+                                             selection: ReaderSelection(text: "原始文档", page: nil),
+                                             kind: "note", note: "保留")
+
+        store.renameTopic(rootTopic.id, name: "  新名称  ")
+        XCTAssertEqual(store.data.topics.first(where: { $0.id == rootTopic.id })?.name, "新名称")
+
+        store.deleteTopic(rootTopic.id)
+        XCTAssertFalse(store.data.topics.contains(where: { $0.id == rootTopic.id || $0.id == childTopic.id }))
+        XCTAssertFalse(store.data.documentTopics.contains(where: { $0.topicId == rootTopic.id || $0.topicId == childTopic.id }))
+        XCTAssertTrue(store.data.documents.contains(where: { $0.id == document.id }))
+        XCTAssertTrue(store.data.annotations.contains(where: { $0.id == annotation.id }))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sourceURL.path))
+    }
+
+    func testMarkdownOutlineFindsHeadingHierarchyAndLocations() {
+        let source = "# 第一章\n正文\n## 子节\n内容\n### 细节"
+        let rendered = "第一章\n正文\n子节\n内容\n细节"
+        let entries = DocumentOutlineBuilder.textEntries(source: source, extensionName: ".md",
+                                                         renderedText: rendered)
+
+        XCTAssertEqual(entries.map(\.title), ["第一章", "子节", "细节"])
+        XCTAssertEqual(entries.map(\.level), [1, 2, 3])
+        XCTAssertEqual(entries.map(\.target), [
+            .text(location: 0), .text(location: 7), .text(location: 13)
+        ])
+    }
+
+    func testHTMLOutlineFindsHeadingHierarchy() {
+        let source = "<html><h1>总览</h1><p>内容</p><h2>方法 <em>A</em></h2></html>"
+        let entries = DocumentOutlineBuilder.textEntries(source: source, extensionName: ".html",
+                                                         renderedText: "总览\n内容\n方法 A")
+
+        XCTAssertEqual(entries.map(\.title), ["总览", "方法 A"])
+        XCTAssertEqual(entries.map(\.level), [1, 2])
+    }
+
     func testChatOffersAllDockingPlacements() {
         XCTAssertEqual(Set(ChatPlacement.allCases), Set([.right, .bottom, .sidebar, .hidden]))
     }
