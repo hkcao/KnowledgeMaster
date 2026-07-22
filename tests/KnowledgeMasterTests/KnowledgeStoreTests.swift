@@ -122,10 +122,16 @@ final class KnowledgeStoreTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: originalCopy), originalData)
         XCTAssertEqual(try Data(contentsOf: source), originalData)
         let output = try XCTUnwrap(PDFDocument(url: annotated))
-        let annotations = try XCTUnwrap(output.page(at: 0)).annotations
+        let exportedPage = try XCTUnwrap(output.page(at: 0))
+        let annotations = exportedPage.annotations
         let exportedAnnotations = annotations.filter { $0.userName == "知屿" }
         XCTAssertEqual(exportedAnnotations.count, 2)
-        XCTAssertTrue(exportedAnnotations.contains { $0.contents == "这是批注" && $0.bounds.minX >= 120 })
+        let noteBubble = try XCTUnwrap(exportedAnnotations.first { $0.type == "Text" })
+        XCTAssertEqual(noteBubble.contents, "这是批注")
+        let pageBounds = exportedPage.bounds(for: .mediaBox)
+        XCTAssertLessThanOrEqual(noteBubble.bounds.maxX, pageBounds.maxX)
+        XCTAssertGreaterThan(noteBubble.bounds.minX, pageBounds.maxX - 32)
+        XCTAssertFalse(noteBubble.bounds.intersects(CGRect(x: 40, y: 100, width: 80, height: 18)))
     }
 
     func testTextAnnotatedExportIncludesQuoteAndNote() {
@@ -430,6 +436,42 @@ final class KnowledgeStoreTests: XCTestCase {
         let position = SelectionToolbarLayout.position(anchorX: 600, anchorY: 300, in: CGSize(width: 800, height: 600))
         XCTAssertEqual(position.x + SelectionToolbarLayout.width / 2, 612, accuracy: 0.01)
         XCTAssertEqual(position.y, 272, accuracy: 0.01)
+    }
+
+    func testReaderZoomScaleFollowsMagnificationAndClamps() {
+        XCTAssertEqual(ReaderZoomBehavior.adjustedScale(current: 1, magnification: 0.25,
+                                                        minimum: 0.5, maximum: 3), 1.25)
+        XCTAssertEqual(ReaderZoomBehavior.adjustedScale(current: 2.8, magnification: 0.5,
+                                                        minimum: 0.5, maximum: 3), 3)
+        XCTAssertEqual(ReaderZoomBehavior.adjustedScale(current: 0.6, magnification: -0.5,
+                                                        minimum: 0.5, maximum: 3), 0.5)
+    }
+
+    func testAnnotationBubblePrefersWhitespaceBesideContent() {
+        let outsidePage = AnnotationBubbleLayout.trailingMarginFrame(
+            alignedTo: 200,
+            contentMaxX: 600,
+            fallbackRightEdge: 592,
+            within: CGRect(x: 0, y: 0, width: 800, height: 900)
+        )
+        XCTAssertGreaterThan(outsidePage.minX, 600)
+
+        let pageMargin = AnnotationBubbleLayout.trailingMarginFrame(
+            alignedTo: 200,
+            contentMaxX: 600,
+            fallbackRightEdge: 592,
+            within: CGRect(x: 0, y: 0, width: 600, height: 900)
+        )
+        XCTAssertEqual(pageMargin.maxX, 592, accuracy: 0.01)
+
+        let textMargin = AnnotationBubbleLayout.trailingMarginFrame(
+            alignedTo: 200,
+            contentMaxX: 764,
+            fallbackRightEdge: 792,
+            within: CGRect(x: 0, y: 0, width: 800, height: 900)
+        )
+        XCTAssertGreaterThan(textMargin.minX, 764)
+        XCTAssertLessThanOrEqual(textMargin.maxX, 798)
     }
 
     func testAgentArgumentsAllowSkillsWithoutExposingTheLibrary() {

@@ -31,10 +31,14 @@ enum PDFKnowledgeAnnotationRenderer {
                   let page = document.page(at: anchor.page - 1) else { continue }
             let pageBounds = page.bounds(for: .mediaBox)
             let size: CGFloat = 20
-            let preferredX = anchor.cgRect.maxX + 5
-            let x = min(max(pageBounds.minX + 2, preferredX), pageBounds.maxX - size - 2)
-            let y = min(max(pageBounds.minY + 2, anchor.cgRect.midY - size / 2), pageBounds.maxY - size - 2)
-            let bubble = PDFAnnotation(bounds: CGRect(x: x, y: y, width: size, height: size),
+            let bubbleFrame = AnnotationBubbleLayout.trailingMarginFrame(
+                alignedTo: anchor.cgRect.midY,
+                contentMaxX: pageBounds.maxX,
+                fallbackRightEdge: pageBounds.maxX - 8,
+                within: pageBounds,
+                size: size
+            )
+            let bubble = PDFAnnotation(bounds: bubbleFrame,
                                        forType: .text, withProperties: nil)
             configure(bubble, for: item, interactive: interactive)
             bubble.color = NSColor.systemGreen

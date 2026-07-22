@@ -40,6 +40,17 @@ private final class InteractivePDFView: PDFView {
         positionAnnotationMarkers()
     }
 
+    override func magnify(with event: NSEvent) {
+        autoScales = false
+        scaleFactor = ReaderZoomBehavior.adjustedScale(
+            current: scaleFactor,
+            magnification: event.magnification,
+            minimum: minScaleFactor,
+            maximum: maxScaleFactor
+        )
+        needsLayout = true
+    }
+
     private func positionAnnotationMarkers() {
         guard let documentView else { return }
         for (id, anchor) in markerAnchors {
@@ -51,10 +62,14 @@ private final class InteractivePDFView: PDFView {
             }
             let viewRect = convert(anchor.cgRect, from: page)
             let rect = documentView.convert(viewRect, from: self)
-            let size: CGFloat = 18
-            let x = min(rect.maxX + 4, documentView.bounds.maxX - size - 2)
-            button.frame = CGRect(x: max(documentView.bounds.minX + 2, x),
-                                  y: rect.midY - size / 2, width: size, height: size)
+            let pageViewRect = convert(page.bounds(for: displayBox), from: page)
+            let pageRect = documentView.convert(pageViewRect, from: self)
+            button.frame = AnnotationBubbleLayout.trailingMarginFrame(
+                alignedTo: rect.midY,
+                contentMaxX: pageRect.maxX,
+                fallbackRightEdge: pageRect.maxX - 8,
+                within: documentView.bounds
+            )
         }
     }
 
@@ -89,6 +104,8 @@ struct PDFReaderView: NSViewRepresentable {
     func makeNSView(context: Context) -> PDFView {
         let view = InteractivePDFView()
         view.autoScales = true
+        view.minScaleFactor = ReaderZoomBehavior.minimumPDFScale
+        view.maxScaleFactor = ReaderZoomBehavior.maximumPDFScale
         view.displayMode = .singlePageContinuous
         view.displayDirection = .vertical
         view.backgroundColor = NSColor.windowBackgroundColor
