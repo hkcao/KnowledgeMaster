@@ -77,34 +77,46 @@ enum AgentRunner {
     }
 
     static func arguments(for backend: ChatBackend, workDirectory: URL, documentsDirectory: URL,
-                          cacheDirectory: URL, answerURL: URL) -> [String] {
+                          cacheDirectory: URL, answerURL: URL, sessionID: String? = nil,
+                          persistent: Bool = false, resume: Bool = false) -> [String] {
         switch backend {
         case .direct:
             return []
         case .claudeCode:
-            return [
+            var values = [
                 "-p", "--output-format", "stream-json", "--verbose", "--include-hook-events",
                 "--permission-mode", "auto",
                 "--tools", "default",
                 "--add-dir", documentsDirectory.path, cacheDirectory.path,
                 "--setting-sources", "user",
-                "--no-session-persistence",
             ]
+            if persistent, let sessionID {
+                values += resume ? ["--resume", sessionID] : ["--session-id", sessionID]
+            } else {
+                values.append("--no-session-persistence")
+            }
+            return values
         case .codex:
-            return [
-                "exec", "--cd", workDirectory.path,
-                "--sandbox", "workspace-write",
+            let common = [
                 "-c", "sandbox_workspace_write.network_access=true",
                 "-c", "web_search=\"live\"",
                 "-c", "features.apps=false",
                 "-c", "features.remote_plugin=false",
-                "--ephemeral",
                 "--skip-git-repo-check",
-                "--color", "never",
                 "--json",
                 "--output-last-message", answerURL.path,
-                "-"
             ]
+            if resume, let sessionID {
+                return ["exec", "resume"] + common + [sessionID, "-"]
+            }
+            var values = [
+                "exec", "--cd", workDirectory.path,
+                "--sandbox", "workspace-write",
+                "--color", "never",
+            ] + common
+            if !persistent { values.append("--ephemeral") }
+            values.append("-")
+            return values
         }
     }
 
@@ -119,9 +131,6 @@ enum AgentRunner {
             let page = item.page.map { "，第 \($0) 页" } ?? ""
             return "\(index + 1). [\(item.kind)\(page)] \(item.quote)" + (item.note.isEmpty ? "" : "\n   用户笔记：\(item.note)")
         }.joined(separator: "\n")
-        let history = request.history.suffix(12).map {
-            "\($0.role == "user" ? "用户" : "助手")：\($0.content)"
-        }.joined(separator: "\n\n")
         let quote = request.quote.map {
             "来自「\($0.documentName)」的当前引用：\n\($0.text)" +
             (selectionImagePath.map { "\n对应的 PDF 选区截图：`\($0)`。涉及公式、表格、图片或版式时请同时查看截图。" } ?? "")
@@ -149,15 +158,37 @@ enum AgentRunner {
         当前引用：
         \(quote)
 
-        最近对话：
-        \(history.isEmpty ? "（无）" : history)
-
         用户问题：
         \(request.question)
         """
     }
 
+    static func followUpPrompt(for request: AgentRunRequest, selectionImagePath: String? = nil) -> String {
+        let annotations = request.annotations.isEmpty ? "（无）" : request.annotations.enumerated().map { index, item in
+            let page = item.page.map { "，第 \($0) 页" } ?? ""
+            return "\(index + 1). [\(item.kind)\(page)] \(item.quote)" +
+                (item.note.isEmpty ? "" : "\n   用户笔记：\(item.note)")
+        }.joined(separator: "\n")
+        let quote = request.quote.map {
+            "来自「\($0.documentName)」的当前引用：\n\($0.text)" +
+                (selectionImagePath.map { "\n对应的 PDF 选区截图：`\($0)`。涉及公式、表格、图片或版式时请同时查看截图。" } ?? "")
+        } ?? "（无）"
+        return """
+        这是同一会话中的下一条用户消息。继续沿用已建立的规则、资料范围与上下文，只处理下面的最新问题。
+
+        本轮相关批注：
+        \(annotations)
+
+        本轮当前引用：
+        \(quote)
+
+        用户最新问题：
+        \(request.question)
+        """
+    }
+
     static func answer(backend: ChatBackend, request: AgentRunRequest, runID: UUID = UUID(),
+                       sessionWorkspaceID: UUID? = nil, sessionID: String? = nil,
                        onProgress: @escaping @MainActor (AgentTraceEvent) -> Void = { _ in }) async throws -> AgentRunResult {
         guard backend != .direct else { throw AgentRunnerError.unsupportedBackend }
         guard let executable = executableURL(for: backend) else { throw AgentRunnerError.notInstalled(backend.name) }
@@ -170,7 +201,18 @@ enum AgentRunner {
         }
 
         let manager = FileManager.default
-        let workspace = manager.temporaryDirectory.appendingPathComponent("KnowledgeMasterAgent-\(UUID().uuidString)", isDirectory: true)
+        let persistent = sessionWorkspaceID != nil
+        let isResume = persistent && sessionID != nil
+        let workspace: URL
+        if let sessionWorkspaceID {
+            workspace = manager.temporaryDirectory
+                .appendingPathComponent("KnowledgeMasterAgentSessions", isDirectory: true)
+                .appendingPathComponent(sessionWorkspaceID.uuidString, isDirectory: true)
+                .appendingPathComponent(backend.rawValue, isDirectory: true)
+        } else {
+            workspace = manager.temporaryDirectory
+                .appendingPathComponent("KnowledgeMasterAgent-\(UUID().uuidString)", isDirectory: true)
+        }
         let documentsDirectory = workspace.appendingPathComponent("documents", isDirectory: true)
         let cacheDirectory = workspace.appendingPathComponent("cache", isDirectory: true)
         let workDirectory = workspace.appendingPathComponent("work", isDirectory: true)
@@ -181,30 +223,82 @@ enum AgentRunner {
         let stdoutURL = controlDirectory.appendingPathComponent("stdout.log")
         let stderrURL = controlDirectory.appendingPathComponent("stderr.log")
         let promptURL = controlDirectory.appendingPathComponent("prompt.md")
+        if persistent, !isResume, manager.fileExists(atPath: workspace.path) {
+            try makeTreeWritable(workspace, manager: manager)
+            try manager.removeItem(at: workspace)
+        } else if persistent {
+            for url in [controlDirectory, downloadsDirectory] where manager.fileExists(atPath: url.path) {
+                try manager.removeItem(at: url)
+            }
+            if manager.fileExists(atPath: answerURL.path) { try manager.removeItem(at: answerURL) }
+        }
         for directory in [documentsDirectory, cacheDirectory, generatedDirectory, downloadsDirectory, controlDirectory] {
             try manager.createDirectory(at: directory, withIntermediateDirectories: true)
         }
-        defer { try? manager.removeItem(at: workspace) }
+        defer {
+            if !persistent { try? manager.removeItem(at: workspace) }
+        }
 
-        let selectionImagePath = try stageSelectionSnapshot(request.quote?.imagePNG,
-                                                            documentsDirectory: documentsDirectory, manager: manager)
-        let documentFiles = try stageOriginalDocuments(request.documents, documentsDirectory: documentsDirectory,
-                                                       cacheDirectory: cacheDirectory, manager: manager)
+        let selectionImagePath = try stageSelectionSnapshot(
+            request.quote?.imagePNG,
+            controlDirectory: controlDirectory,
+            manager: manager
+        )
+        let expectedDocuments = request.documents.map { document in
+            documentsDirectory.appendingPathComponent(document.id.uuidString, isDirectory: true)
+                .appendingPathComponent(safeOriginalFilename(document.name))
+        }
+        let needsStaging = !isResume || !expectedDocuments.allSatisfy {
+            manager.fileExists(atPath: $0.path)
+        }
+        let documentFiles: [(UUID, String, String, Bool)]
+        if needsStaging {
+            for url in [documentsDirectory, cacheDirectory] where manager.fileExists(atPath: url.path) {
+                try makeTreeWritable(url, manager: manager)
+                try manager.removeItem(at: url)
+                try manager.createDirectory(at: url, withIntermediateDirectories: true)
+            }
+            documentFiles = try stageOriginalDocuments(
+                request.documents,
+                documentsDirectory: documentsDirectory,
+                cacheDirectory: cacheDirectory,
+                manager: manager
+            )
+        } else {
+            documentFiles = request.documents.map { document in
+                let hasCache = manager.fileExists(
+                    atPath: cacheDirectory.appendingPathComponent(document.id.uuidString, isDirectory: true).path
+                )
+                return (
+                    document.id,
+                    "../documents/\(document.id.uuidString)/\(safeOriginalFilename(document.name))",
+                    document.displayName ?? document.name,
+                    hasCache
+                )
+            }
+        }
         let cachedCount = documentFiles.filter(\.3).count
         var preparationDetail = cachedCount > 0
             ? "\(documentFiles.count) 份原始资料 · \(cachedCount) 份已有解析缓存"
             : "\(documentFiles.count) 份原始资料"
         if selectionImagePath != nil { preparationDetail += " · PDF 选区截图" }
-        await publish([AgentTraceEvent(kind: .status, title: "已准备只读资料副本", detail: preparationDetail)])
-        let prompt = prompt(for: request, documentFiles: documentFiles, selectionImagePath: selectionImagePath)
+        let preparationTitle = isResume ? "已恢复 Agent 会话" : "已准备只读资料副本"
+        await publish([AgentTraceEvent(kind: .status, title: preparationTitle, detail: preparationDetail)])
+        let prompt = isResume
+            ? followUpPrompt(for: request, selectionImagePath: selectionImagePath)
+            : prompt(for: request, documentFiles: documentFiles, selectionImagePath: selectionImagePath)
         try prompt.write(to: promptURL, atomically: true, encoding: .utf8)
         manager.createFile(atPath: stdoutURL.path, contents: nil)
         manager.createFile(atPath: stderrURL.path, contents: nil)
 
         let process = Process()
         process.executableURL = executable
+        let effectiveSessionID = persistent && backend == .claudeCode
+            ? (sessionID ?? UUID().uuidString)
+            : sessionID
         process.arguments = arguments(for: backend, workDirectory: workDirectory, documentsDirectory: documentsDirectory,
-                                      cacheDirectory: cacheDirectory, answerURL: answerURL)
+                                      cacheDirectory: cacheDirectory, answerURL: answerURL,
+                                      sessionID: effectiveSessionID, persistent: persistent, resume: isResume)
         process.currentDirectoryURL = workDirectory
         process.environment = sanitizedEnvironment(for: backend)
         let input = try FileHandle(forReadingFrom: promptURL)
@@ -292,8 +386,13 @@ enum AgentRunner {
         if trace.events.last?.kind != .completed {
             await publish([AgentTraceEvent(kind: .completed, title: "\(backend.name) 执行完成")])
         }
-        return AgentRunResult(answer: answer, generatedFiles: generatedFiles,
-                              traceEvents: trace.events, downloadedFiles: downloadedFiles)
+        return AgentRunResult(
+            answer: answer,
+            generatedFiles: generatedFiles,
+            traceEvents: trace.events,
+            downloadedFiles: downloadedFiles,
+            sessionID: parser.sessionID ?? effectiveSessionID
+        )
     }
 
     static func stageOriginalDocuments(_ documents: [AgentSourceDocument], documentsDirectory: URL,
@@ -332,16 +431,14 @@ enum AgentRunner {
         return manifest
     }
 
-    static func stageSelectionSnapshot(_ imagePNG: Data?, documentsDirectory: URL,
+    static func stageSelectionSnapshot(_ imagePNG: Data?, controlDirectory: URL,
                                        manager: FileManager = .default) throws -> String? {
         guard let imagePNG, !imagePNG.isEmpty else { return nil }
-        let directory = documentsDirectory.appendingPathComponent("_selection", isDirectory: true)
-        try manager.createDirectory(at: directory, withIntermediateDirectories: true)
-        let destination = directory.appendingPathComponent("selection.png")
+        try manager.createDirectory(at: controlDirectory, withIntermediateDirectories: true)
+        let destination = controlDirectory.appendingPathComponent("selection.png")
         try imagePNG.write(to: destination, options: .atomic)
         try manager.setAttributes([.posixPermissions: 0o444], ofItemAtPath: destination.path)
-        try manager.setAttributes([.posixPermissions: 0o555], ofItemAtPath: directory.path)
-        return "../documents/_selection/selection.png"
+        return "../control/selection.png"
     }
 
     static func syncGeneratedFiles(from generatedDirectory: URL, documents: [AgentSourceDocument],
@@ -451,6 +548,16 @@ enum AgentRunner {
             }
         }
         try manager.setAttributes([.posixPermissions: 0o555], ofItemAtPath: root.path)
+    }
+
+    private static func makeTreeWritable(_ root: URL, manager: FileManager) throws {
+        try manager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root.path)
+        if let enumerator = manager.enumerator(at: root, includingPropertiesForKeys: [.isDirectoryKey]) {
+            for case let item as URL in enumerator {
+                let isDirectory = try item.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true
+                try manager.setAttributes([.posixPermissions: isDirectory ? 0o755 : 0o644], ofItemAtPath: item.path)
+            }
+        }
     }
 
     static func sanitizedEnvironment(for backend: ChatBackend,

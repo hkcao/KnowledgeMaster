@@ -3,6 +3,7 @@ import Foundation
 struct AgentStreamUpdate: Hashable {
     var events: [AgentTraceEvent] = []
     var finalAnswer: String?
+    var sessionID: String?
 }
 
 struct AgentStreamParser {
@@ -10,6 +11,7 @@ struct AgentStreamParser {
     let workspacePath: String
     private var buffer = Data()
     private(set) var finalAnswer: String?
+    private(set) var sessionID: String?
 
     init(backend: ChatBackend, workspacePath: String) {
         self.backend = backend
@@ -25,6 +27,7 @@ struct AgentStreamParser {
             let update = Self.parse(line: line, backend: backend, workspacePath: workspacePath)
             events.append(contentsOf: update.events)
             if let answer = update.finalAnswer { finalAnswer = answer }
+            if let value = update.sessionID { sessionID = value }
         }
         return events
     }
@@ -35,6 +38,7 @@ struct AgentStreamParser {
         buffer.removeAll(keepingCapacity: false)
         let update = Self.parse(line: line, backend: backend, workspacePath: workspacePath)
         if let answer = update.finalAnswer { finalAnswer = answer }
+        if let value = update.sessionID { sessionID = value }
         return update.events
     }
 
@@ -51,7 +55,9 @@ struct AgentStreamParser {
         let type = json["type"] as? String ?? ""
         switch type {
         case "thread.started":
-            return event(.status, "Codex 会话已建立")
+            var update = event(.status, "Codex 会话已建立")
+            update.sessionID = nonempty(json["thread_id"] as? String)
+            return update
         case "turn.started":
             return event(.status, "开始分析问题")
         case "turn.completed":
@@ -114,7 +120,11 @@ struct AgentStreamParser {
         switch type {
         case "system":
             let subtype = json["subtype"] as? String ?? ""
-            if subtype == "init" { return event(.status, "Claude Code 会话已建立") }
+            if subtype == "init" {
+                var update = event(.status, "Claude Code 会话已建立")
+                update.sessionID = nonempty(json["session_id"] as? String)
+                return update
+            }
             if subtype.contains("hook") {
                 let hook = json["hook_name"] as? String ?? json["name"] as? String
                 return event(.tool, "正在运行 Hook", hook)

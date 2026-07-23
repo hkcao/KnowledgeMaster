@@ -173,10 +173,10 @@ struct LibraryView: View {
                         ProgressView().controlSize(.small)
                         Text("正在整理论文名…").font(.caption)
                     } else {
-                        Button("AI 整理论文名", systemImage: "textformat") { Task { await refinePaperNames() } }
+                        Button("整理论文名", systemImage: "textformat") { Task { await refinePaperNames() } }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
-                            .help("AI 整理论文名称（会向已配置模型发送 PDF 第一页文本）")
+                            .help("优先在本机提取；失败时只向已配置模型发送标题与作者候选区")
                     }
                     Spacer()
                 }.padding(.horizontal, 10).padding(.bottom, 6)
@@ -478,29 +478,34 @@ struct LibraryView: View {
     }
 
     @MainActor private func refinePaperNames() async {
-        guard !settings.apiKeyForUse().isEmpty else { importMessage = "请先在设置中配置 API Key"; return }
         let documents = store.data.documents.filter(PaperNamingService.needsRefinement)
         guard !documents.isEmpty else { return }
         isRenamingPapers = true
-        importMessage = "正在用模型整理 \(documents.count) 篇论文名称…"
+        importMessage = "正在本地整理 \(documents.count) 篇论文名称，必要时使用模型…"
         var updated = 0
         var failures: [String] = []
+        var unresolved = 0
         for document in documents {
             do {
                 if let name = try await PaperNamingService.suggestName(
-                    document: document, extracted: store.extractedContent(for: document.id), settings: settings
+                    document: document,
+                    sourceURL: store.storedURL(for: document),
+                    extracted: store.extractedContent(for: document.id),
+                    settings: settings
                 ), name != document.displayTitle {
                     store.updateDocumentDisplayName(document.id, displayName: name)
                     updated += 1
+                } else {
+                    unresolved += 1
                 }
             } catch {
                 failures.append(document.name)
             }
         }
         isRenamingPapers = false
-        importMessage = failures.isEmpty
-            ? "已更新 \(updated) 篇论文的虚拟名称"
-            : "已更新 \(updated) 篇；\(failures.count) 篇调用失败"
+        let unresolvedText = unresolved > 0 ? "；\(unresolved) 篇未能可靠识别" : ""
+        let failureText = failures.isEmpty ? "" : "；\(failures.count) 篇模型调用失败"
+        importMessage = "已更新 \(updated) 篇论文的虚拟名称\(unresolvedText)\(failureText)"
     }
 
     private var recommendationSheet: some View {

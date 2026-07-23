@@ -95,11 +95,7 @@ enum DocumentExtractor {
     }
 
     static func paperDisplayName(at url: URL) -> String? {
-        guard let pdf = PDFDocument(url: url), let firstPage = pdf.page(at: 0)?.string else { return nil }
-        let normalized = firstPage.replacingOccurrences(of: "\r\n", with: "\n")
-        let lower = normalized.lowercased()
-        guard lower.contains("\nabstract") || normalized.contains("摘要") else { return nil }
-
+        guard let pdf = PDFDocument(url: url) else { return nil }
         let attributes = pdf.documentAttributes ?? [:]
         let rawMetadataTitle = cleanMetadata(attributes[PDFDocumentAttribute.titleAttribute] as? String)
         let fileStem = url.deletingPathExtension().lastPathComponent
@@ -108,10 +104,17 @@ enum DocumentExtractor {
             $0.localizedCaseInsensitiveCompare(fileStem) == .orderedSame ? nil : $0
         }
         let metadataAuthor = cleanMetadata(attributes[PDFDocumentAttribute.authorAttribute] as? String)
+        if let metadataTitle {
+            return paperDisplayName(title: metadataTitle, authors: metadataAuthor)
+        }
+        guard let firstPage = pdf.page(at: 0)?.string else { return nil }
+        let normalized = firstPage.replacingOccurrences(of: "\r\n", with: "\n")
+        let lower = normalized.lowercased()
+        guard lower.contains("\nabstract") || normalized.contains("摘要") else { return nil }
         let lines = normalized.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
-        let title = metadataTitle ?? inferredTitle(from: lines)
+        let title = inferredTitle(from: lines)
         guard let title else { return nil }
-        let author = metadataAuthor ?? inferredAuthor(from: lines, title: title)
+        let author = inferredAuthor(from: lines, title: title)
         return paperDisplayName(title: title, authors: author)
     }
 
@@ -121,6 +124,41 @@ enum DocumentExtractor {
         guard let authors, let first = firstAuthorSurname(from: authors) else { return cleanTitle }
         let multiple = authors.contains(",") || authors.contains(";") || authors.range(of: " and ", options: .caseInsensitive) != nil
         return multiple ? "\(first) et al., \(cleanTitle)" : "\(first), \(cleanTitle)"
+    }
+
+    static func paperHeaderCandidate(from extracted: ExtractedDocument, limit: Int = 1_600) -> String? {
+        let source = extracted.pages.first?.text ?? extracted.text
+        let lines = source.replacingOccurrences(of: "\r\n", with: "\n")
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        var selected: [String] = []
+        var count = 0
+        for line in lines.prefix(40) {
+            let normalized = line.lowercased()
+                .trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+            if !selected.isEmpty,
+               normalized == "abstract" || normalized == "摘要" ||
+               normalized.hasPrefix("abstract ") || normalized.hasPrefix("摘要：") {
+                break
+            }
+            let isAffiliation = line.contains("@") || [
+                "university", "institute", "department", "laboratory", "school of",
+                "college", "research center", "研究院", "大学", "学院", "实验室"
+            ].contains { normalized.contains($0) }
+            let isHeaderNoise = normalized.hasPrefix("arxiv:") || normalized.hasPrefix("doi:") ||
+                normalized.contains("conference paper") || normalized.contains("published as")
+            guard line.count <= 500, !isAffiliation, !isHeaderNoise else { continue }
+            let remaining = limit - count
+            guard remaining > 0 else { break }
+            let value = String(line.prefix(remaining))
+            selected.append(value)
+            count += value.count + 1
+            if selected.count == 8 { break }
+        }
+        let result = selected.joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return result.isEmpty ? nil : result
     }
 
     static func firstAuthorSurname(from authors: String) -> String? {

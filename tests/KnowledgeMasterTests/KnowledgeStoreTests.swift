@@ -1,5 +1,6 @@
 import XCTest
 import PDFKit
+import AppKit
 @testable import KnowledgeMaster
 
 @MainActor
@@ -53,6 +54,30 @@ final class KnowledgeStoreTests: XCTestCase {
             title: "Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks",
             authors: "Patrick Lewis, Ethan Perez, Aleksandra Piktus"
         ), "Lewis et al., Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks")
+    }
+
+    func testPaperVirtualNameUsesPDFMetadataWithoutReadingFirstPageText() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("pdf")
+        let pdf = PDFDocument()
+        let image = NSImage(size: NSSize(width: 20, height: 20))
+        image.lockFocus()
+        NSColor.white.setFill()
+        NSRect(x: 0, y: 0, width: 20, height: 20).fill()
+        image.unlockFocus()
+        let page = try XCTUnwrap(PDFPage(image: image))
+        pdf.insert(page, at: 0)
+        pdf.documentAttributes = [
+            PDFDocumentAttribute.titleAttribute: "A Metadata-Only Paper Title",
+            PDFDocumentAttribute.authorAttribute: "Ada Lovelace and Alan Turing"
+        ]
+        XCTAssertTrue(pdf.write(to: url))
+
+        XCTAssertEqual(
+            DocumentExtractor.paperDisplayName(at: url),
+            "Lovelace et al., A Metadata-Only Paper Title"
+        )
     }
 
     func testSummaryNotesCanLinkAnnotationsAndCleanDeletedLinks() throws {
@@ -171,6 +196,38 @@ final class KnowledgeStoreTests: XCTestCase {
         """
         let decoded = try JSONDecoder().decode(Conversation.self, from: Data(oldJSON.utf8))
         XCTAssertFalse(decoded.includeCurrentPage)
+    }
+
+    func testLegacyConversationSummaryIsAssumedToCoverExistingMessages() throws {
+        let id = UUID()
+        let messageID = UUID()
+        let oldJSON = """
+        {"id":"\(id.uuidString)","title":"旧对话","messages":[{"id":"\(messageID.uuidString)","role":"user","content":"旧问题","createdAt":0}],"summary":"已有摘要","createdAt":0,"updatedAt":0}
+        """
+        let decoded = try JSONDecoder().decode(Conversation.self, from: Data(oldJSON.utf8))
+
+        XCTAssertEqual(decoded.summaryMessageCount, 1)
+        XCTAssertTrue(decoded.agentSessions.isEmpty)
+        XCTAssertTrue(ConversationSummaryPlanner.pendingMessages(in: decoded).isEmpty)
+    }
+
+    func testConversationSummaryUsesExistingSummaryAndNextThirtyUnprocessedMessages() {
+        let messages = (0..<35).map { ChatMessage(role: "user", content: "消息\($0)") }
+        let conversation = Conversation(
+            messages: messages,
+            summary: "旧摘要",
+            summaryMessageCount: 2
+        )
+
+        let pending = ConversationSummaryPlanner.pendingMessages(in: conversation)
+        let prompt = ConversationSummaryPlanner.prompt(existingSummary: conversation.summary, messages: pending)
+
+        XCTAssertEqual(pending.count, 30)
+        XCTAssertEqual(pending.first?.content, "消息2")
+        XCTAssertEqual(pending.last?.content, "消息31")
+        XCTAssertTrue(prompt.contains("旧摘要"))
+        XCTAssertTrue(prompt.contains("消息2"))
+        XCTAssertFalse(prompt.contains("消息32"))
     }
 
     func testMissingMetadataFieldsRemainCompatible() throws {
@@ -497,6 +554,17 @@ final class KnowledgeStoreTests: XCTestCase {
         XCTAssertFalse(withoutCurrent.contains(current))
     }
 
+    func testDirectAPIHistoryReusesStoredOutboundPromptAndAppendsNewestMessage() {
+        let first = ChatMessage(role: "user", content: "界面问题", promptContent: "带检索资料的实际问题")
+        let answer = ChatMessage(role: "assistant", content: "回答")
+        let newest = ChatMessage(role: "user", content: "继续追问")
+
+        let messages = ChatPromptBuilder.messages(from: [first, answer, newest])
+
+        XCTAssertEqual(messages.map(\.content), ["带检索资料的实际问题", "回答", "继续追问"])
+        XCTAssertEqual(messages.map(\.role), ["user", "assistant", "user"])
+    }
+
     func testReaderQuoteImageIsTransientAndNotSavedInConversationHistory() throws {
         let quote = ReaderQuote(text: "公式", documentId: UUID(), documentName: "paper.pdf", page: 2,
                                 imagePNG: Data([1, 2, 3]))
@@ -612,6 +680,32 @@ final class KnowledgeStoreTests: XCTestCase {
         XCTAssertFalse(codex.contains("--ignore-user-config"))
         XCTAssertFalse(codex.contains("--ignore-rules"))
         XCTAssertFalse(codex.contains("--dangerously-bypass-approvals-and-sandbox"))
+
+        let sessionID = UUID().uuidString
+        let persistentClaude = AgentRunner.arguments(
+            for: .claudeCode, workDirectory: work, documentsDirectory: documents,
+            cacheDirectory: cache, answerURL: answer, sessionID: sessionID,
+            persistent: true, resume: false
+        )
+        XCTAssertTrue(persistentClaude.contains("--session-id"))
+        XCTAssertTrue(persistentClaude.contains(sessionID))
+        XCTAssertFalse(persistentClaude.contains("--no-session-persistence"))
+
+        let resumedClaude = AgentRunner.arguments(
+            for: .claudeCode, workDirectory: work, documentsDirectory: documents,
+            cacheDirectory: cache, answerURL: answer, sessionID: sessionID,
+            persistent: true, resume: true
+        )
+        XCTAssertTrue(resumedClaude.contains("--resume"))
+
+        let resumedCodex = AgentRunner.arguments(
+            for: .codex, workDirectory: work, documentsDirectory: documents,
+            cacheDirectory: cache, answerURL: answer, sessionID: sessionID,
+            persistent: true, resume: true
+        )
+        XCTAssertEqual(Array(resumedCodex.prefix(2)), ["exec", "resume"])
+        XCTAssertTrue(resumedCodex.contains(sessionID))
+        XCTAssertFalse(resumedCodex.contains("--ephemeral"))
     }
 
     func testPaperNamingServiceParsesJSONAndRejectsBadExistingNames() throws {
@@ -626,11 +720,37 @@ final class KnowledgeStoreTests: XCTestCase {
         XCTAssertTrue(PaperNamingService.needsRefinement(document))
     }
 
+    func testPaperNamingFallbackOnlyUsesCompactTitleAndAuthorCandidate() throws {
+        let extracted = ExtractedDocument(
+            text: "",
+            pages: [ExtractedPage(
+                number: 1,
+                text: """
+                Efficient Knowledge Retrieval for Long Documents
+                Alice Zhang, Bob Lee
+                University of Example
+                alice@example.com
+                Abstract
+                This full abstract must not be sent to the naming model.
+                """
+            )]
+        )
+
+        let candidate = try XCTUnwrap(DocumentExtractor.paperHeaderCandidate(from: extracted))
+
+        XCTAssertTrue(candidate.contains("Efficient Knowledge Retrieval"))
+        XCTAssertTrue(candidate.contains("Alice Zhang"))
+        XCTAssertFalse(candidate.contains("University of Example"))
+        XCTAssertFalse(candidate.contains("alice@example.com"))
+        XCTAssertFalse(candidate.contains("full abstract"))
+        XCTAssertLessThanOrEqual(candidate.count, 1_600)
+    }
+
     func testAgentPromptTreatsDocumentsAsUntrustedData() {
         let request = AgentRunRequest(
             question: "比较两份资料",
             quote: nil,
-            history: [],
+            history: [ChatMessage(role: "user", content: "不应补发的旧消息")],
             documents: [],
             annotations: []
         )
@@ -643,6 +763,27 @@ final class KnowledgeStoreTests: XCTestCase {
         XCTAssertTrue(prompt.contains("../documents/\(documentID.uuidString)/a.pdf"))
         XCTAssertTrue(prompt.contains("generated/<文档ID>/"))
         XCTAssertTrue(prompt.contains("比较两份资料"))
+        XCTAssertFalse(prompt.contains("不应补发的旧消息"))
+    }
+
+    func testResumedAgentPromptContainsOnlyLatestTurnContext() {
+        let request = AgentRunRequest(
+            question: "只解释最新问题",
+            quote: ReaderQuote(text: "最新选区", documentId: UUID(), documentName: "paper.pdf", page: 2),
+            history: [
+                ChatMessage(role: "user", content: "不应重发的旧问题"),
+                ChatMessage(role: "assistant", content: "不应重发的旧回答")
+            ],
+            documents: [],
+            annotations: []
+        )
+
+        let prompt = AgentRunner.followUpPrompt(for: request)
+
+        XCTAssertTrue(prompt.contains("只解释最新问题"))
+        XCTAssertTrue(prompt.contains("最新选区"))
+        XCTAssertFalse(prompt.contains("不应重发的旧问题"))
+        XCTAssertFalse(prompt.contains("不应重发的旧回答"))
     }
 
     func testAgentStagesAnExactReadOnlyCopyOfTheOriginalFile() throws {
@@ -700,13 +841,13 @@ final class KnowledgeStoreTests: XCTestCase {
 
     func testAgentStagesSelectionSnapshotAsReadOnlyContext() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let documents = root.appendingPathComponent("documents")
-        try FileManager.default.createDirectory(at: documents, withIntermediateDirectories: true)
+        let control = root.appendingPathComponent("control")
+        try FileManager.default.createDirectory(at: control, withIntermediateDirectories: true)
 
-        let path = try AgentRunner.stageSelectionSnapshot(Data([1, 2, 3]), documentsDirectory: documents)
-        let staged = documents.appendingPathComponent("_selection/selection.png")
+        let path = try AgentRunner.stageSelectionSnapshot(Data([1, 2, 3]), controlDirectory: control)
+        let staged = control.appendingPathComponent("selection.png")
 
-        XCTAssertEqual(path, "../documents/_selection/selection.png")
+        XCTAssertEqual(path, "../control/selection.png")
         XCTAssertEqual(try Data(contentsOf: staged), Data([1, 2, 3]))
         XCTAssertEqual((try FileManager.default.attributesOfItem(atPath: staged.path)[.posixPermissions] as? NSNumber)?.intValue,
                        0o444)
@@ -808,6 +949,20 @@ final class KnowledgeStoreTests: XCTestCase {
         XCTAssertTrue(command.events.first?.detail?.contains("pdftotext") == true)
     }
 
+    func testAgentStreamParserCapturesResumableSessionIDs() {
+        let codex = AgentStreamParser.parse(
+            line: #"{"type":"thread.started","thread_id":"codex-session"}"#,
+            backend: .codex
+        )
+        let claude = AgentStreamParser.parse(
+            line: #"{"type":"system","subtype":"init","session_id":"claude-session"}"#,
+            backend: .claudeCode
+        )
+
+        XCTAssertEqual(codex.sessionID, "codex-session")
+        XCTAssertEqual(claude.sessionID, "claude-session")
+    }
+
     func testCodexReconnectIsAWarningRatherThanAFinalError() {
         let update = AgentStreamParser.parse(
             line: #"{"type":"error","message":"Reconnecting... 2/5 (request timed out)"}"#,
@@ -879,6 +1034,7 @@ final class KnowledgeStoreTests: XCTestCase {
         let data = #"{"id":"\#(id.uuidString)","role":"assistant","content":"ok","createdAt":0}"#.data(using: .utf8)!
         let message = try JSONDecoder().decode(ChatMessage.self, from: data)
         XCTAssertNil(message.backend)
+        XCTAssertNil(message.promptContent)
         XCTAssertNil(message.generatedFiles)
         XCTAssertNil(message.traceEvents)
     }

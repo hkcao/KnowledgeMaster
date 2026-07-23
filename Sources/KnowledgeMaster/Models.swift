@@ -259,6 +259,7 @@ struct ChatMessage: Codable, Identifiable, Hashable {
     var id: UUID
     var role: String
     var content: String
+    var promptContent: String?
     var quote: ReaderQuote?
     var sources: [ContextChunk]?
     var backend: String?
@@ -267,7 +268,8 @@ struct ChatMessage: Codable, Identifiable, Hashable {
     var traceEvents: [AgentTraceEvent]?
     var createdAt: Date
 
-    init(id: UUID = UUID(), role: String, content: String, quote: ReaderQuote? = nil,
+    init(id: UUID = UUID(), role: String, content: String, promptContent: String? = nil,
+         quote: ReaderQuote? = nil,
          sources: [ContextChunk]? = nil, backend: String? = nil, generatedFiles: [String]? = nil,
          pendingImports: [String]? = nil,
          traceEvents: [AgentTraceEvent]? = nil,
@@ -275,6 +277,7 @@ struct ChatMessage: Codable, Identifiable, Hashable {
         self.id = id
         self.role = role
         self.content = content
+        self.promptContent = promptContent
         self.quote = quote
         self.sources = sources
         self.backend = backend
@@ -283,6 +286,12 @@ struct ChatMessage: Codable, Identifiable, Hashable {
         self.traceEvents = traceEvents
         self.createdAt = createdAt
     }
+}
+
+struct AgentSessionState: Codable, Hashable {
+    var id: String
+    var scopeSignature: String
+    var messageCount: Int
 }
 
 struct Conversation: Codable, Identifiable, Hashable {
@@ -295,12 +304,16 @@ struct Conversation: Codable, Identifiable, Hashable {
     var currentDocumentId: UUID?
     var messages: [ChatMessage]
     var summary: String
+    var summaryMessageCount: Int
+    var agentSessions: [String: AgentSessionState]
     var createdAt: Date
     var updatedAt: Date
 
     init(id: UUID = UUID(), title: String = "新对话", documentIds: [UUID] = [], topicIds: [UUID] = [],
          includeCurrentPage: Bool = false, includeAnnotations: Bool = true, currentDocumentId: UUID? = nil,
-         messages: [ChatMessage] = [], summary: String = "", createdAt: Date = Date(), updatedAt: Date = Date()) {
+         messages: [ChatMessage] = [], summary: String = "", summaryMessageCount: Int = 0,
+         agentSessions: [String: AgentSessionState] = [:],
+         createdAt: Date = Date(), updatedAt: Date = Date()) {
         self.id = id
         self.title = title
         self.documentIds = documentIds
@@ -310,13 +323,15 @@ struct Conversation: Codable, Identifiable, Hashable {
         self.currentDocumentId = currentDocumentId
         self.messages = messages
         self.summary = summary
+        self.summaryMessageCount = min(max(0, summaryMessageCount), messages.count)
+        self.agentSessions = agentSessions
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
 
     enum CodingKeys: String, CodingKey {
         case id, title, documentIds, topicIds, includeCurrentPage, includeAnnotations, currentDocumentId
-        case messages, summary, createdAt, updatedAt
+        case messages, summary, summaryMessageCount, agentSessions, createdAt, updatedAt
     }
 
     init(from decoder: Decoder) throws {
@@ -330,6 +345,12 @@ struct Conversation: Codable, Identifiable, Hashable {
         currentDocumentId = try c.decodeIfPresent(UUID.self, forKey: .currentDocumentId)
         messages = try c.decodeIfPresent([ChatMessage].self, forKey: .messages) ?? []
         summary = try c.decodeIfPresent(String.self, forKey: .summary) ?? ""
+        summaryMessageCount = min(
+            max(0, try c.decodeIfPresent(Int.self, forKey: .summaryMessageCount)
+                ?? (summary.isEmpty ? 0 : messages.count)),
+            messages.count
+        )
+        agentSessions = try c.decodeIfPresent([String: AgentSessionState].self, forKey: .agentSessions) ?? [:]
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
         updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
     }
@@ -402,6 +423,7 @@ struct AgentRunResult: Hashable {
     var generatedFiles: [String]
     var traceEvents: [AgentTraceEvent]
     var downloadedFiles: [URL] = []
+    var sessionID: String? = nil
 }
 
 struct ReaderSelection: Hashable {
