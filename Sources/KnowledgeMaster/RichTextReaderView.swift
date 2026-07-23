@@ -66,6 +66,9 @@ struct RichTextReaderView: NSViewRepresentable {
         let scroll = NSScrollView()
         scroll.hasVerticalScroller = true
         scroll.drawsBackground = false
+        scroll.allowsMagnification = true
+        scroll.minMagnification = 0.5
+        scroll.maxMagnification = 3
         let textView = AnnotationTextView()
         textView.isEditable = false
         textView.isSelectable = true

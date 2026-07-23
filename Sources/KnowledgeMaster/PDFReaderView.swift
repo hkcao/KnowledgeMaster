@@ -2,26 +2,23 @@ import SwiftUI
 import PDFKit
 
 private final class PDFBookmarkButton: NSButton {
+    var pageIndex = 0
     var isBookmarked = false {
         didSet {
             toolTip = isBookmarked ? "取消本页书签" : "将本页设为书签"
-            let configuration = NSImage.SymbolConfiguration(pointSize: 20, weight: .semibold)
-            image = isBookmarked
-                ? NSImage(systemSymbolName: "bookmark.fill", accessibilityDescription: "本页书签")?
-                    .withSymbolConfiguration(configuration)
-                : nil
-            needsDisplay = true
+            updateRibbon()
         }
     }
     private var isHovered = false
     private var trackingAreaValue: NSTrackingArea?
+    private let ribbonLayer = CAShapeLayer()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.addSublayer(ribbonLayer)
         isBordered = false
         title = ""
-        imagePosition = .imageOnly
-        contentTintColor = .systemOrange
         focusRingType = .none
         toolTip = "将本页设为书签"
     }
@@ -44,22 +41,46 @@ private final class PDFBookmarkButton: NSButton {
 
     override func mouseEntered(with event: NSEvent) {
         isHovered = true
-        needsDisplay = true
+        updateRibbon()
     }
 
     override func mouseExited(with event: NSEvent) {
         isHovered = false
-        needsDisplay = true
+        updateRibbon()
     }
 
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        if !isBookmarked && isHovered {
-            NSColor.controlAccentColor.withAlphaComponent(0.75).setStroke()
-            let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 2), xRadius: 5, yRadius: 5)
-            path.lineWidth = 1.5
-            path.setLineDash([4, 3], count: 2, phase: 0)
-            path.stroke()
+    override func layout() {
+        super.layout()
+        updateRibbon()
+    }
+
+    private func updateRibbon() {
+        let rect = bounds.insetBy(dx: 2, dy: 1)
+        let notchDepth: CGFloat = 7
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY + notchDepth))
+        path.addLine(to: CGPoint(x: rect.midX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + notchDepth))
+        path.closeSubpath()
+        ribbonLayer.frame = bounds
+        ribbonLayer.path = path
+        ribbonLayer.lineWidth = 1.5
+        if isBookmarked {
+            ribbonLayer.fillColor = (isHighlighted
+                ? NSColor.systemOrange.withAlphaComponent(0.72)
+                : .systemOrange).cgColor
+            ribbonLayer.strokeColor = NSColor.systemOrange.cgColor
+            ribbonLayer.lineDashPattern = nil
+        } else if isHovered {
+            ribbonLayer.fillColor = NSColor.clear.cgColor
+            ribbonLayer.strokeColor = NSColor.systemOrange.withAlphaComponent(0.9).cgColor
+            ribbonLayer.lineDashPattern = [4, 3]
+        } else {
+            ribbonLayer.fillColor = NSColor.clear.cgColor
+            ribbonLayer.strokeColor = NSColor.clear.cgColor
+            ribbonLayer.lineDashPattern = nil
         }
     }
 }
@@ -69,8 +90,7 @@ private final class InteractivePDFView: PDFView {
     var onBookmarkToggle: ((Int) -> Void)?
     private var markerAnchors: [UUID: AnnotationRect] = [:]
     private var markerButtons: [UUID: NSButton] = [:]
-    private var bookmarkButton: PDFBookmarkButton?
-    private var bookmarkedPageIndex: Int?
+    private var bookmarkButtons: [Int: PDFBookmarkButton] = [:]
     private var scrollObserver: NSObjectProtocol?
 
     deinit {
@@ -109,32 +129,51 @@ private final class InteractivePDFView: PDFView {
     }
 
     func resetBookmarkMarkers() {
-        bookmarkButton?.removeFromSuperview()
-        bookmarkButton = nil
-        bookmarkedPageIndex = nil
+        bookmarkButtons.values.forEach { $0.removeFromSuperview() }
+        bookmarkButtons.removeAll()
     }
 
     func updateBookmarkMarkers(bookmarkedPageIndex: Int?) {
-        guard document != nil else {
+        guard let document else {
             resetBookmarkMarkers()
             return
         }
-        self.bookmarkedPageIndex = bookmarkedPageIndex
-        if bookmarkButton == nil {
-            let button = PDFBookmarkButton(frame: .zero)
-            button.target = self
-            button.action = #selector(bookmarkButtonClicked(_:))
-            addSubview(button)
-            bookmarkButton = button
+        let validIndexes = Set(0..<document.pageCount)
+        for index in bookmarkButtons.keys.filter({ !validIndexes.contains($0) }) {
+            bookmarkButtons.removeValue(forKey: index)?.removeFromSuperview()
+        }
+        for index in 0..<document.pageCount {
+            let button = bookmarkButtons[index] ?? {
+                let value = PDFBookmarkButton(frame: .zero)
+                value.pageIndex = index
+                value.target = self
+                value.action = #selector(bookmarkButtonClicked(_:))
+                value.setAccessibilityLabel("第 \(index + 1) 页书签")
+                addSubview(value)
+                bookmarkButtons[index] = value
+                return value
+            }()
+            button.isBookmarked = index == bookmarkedPageIndex
         }
         observeScrollChanges()
-        refreshBookmarkMarkerForCurrentPage()
+        positionBookmarkMarkers()
     }
 
     override func layout() {
         super.layout()
         positionAnnotationMarkers()
-        refreshBookmarkMarkerForCurrentPage()
+        positionBookmarkMarkers()
+    }
+
+    override func magnify(with event: NSEvent) {
+        autoScales = false
+        scaleFactor = ReaderZoomBehavior.adjustedScale(
+            current: scaleFactor,
+            magnification: event.magnification,
+            minimum: minScaleFactor,
+            maximum: maxScaleFactor
+        )
+        needsLayout = true
     }
 
     private func positionAnnotationMarkers() {
@@ -155,21 +194,20 @@ private final class InteractivePDFView: PDFView {
         }
     }
 
-    func refreshBookmarkMarkerForCurrentPage() {
-        let viewportCenter = CGPoint(x: bounds.midX, y: bounds.midY)
-        guard let document,
-              let page = page(for: viewportCenter, nearest: true) ?? currentPage,
-              let button = bookmarkButton else { return }
-        let index = document.index(for: page)
-        guard index != NSNotFound else { return }
-        let pageRect = convert(page.bounds(for: displayBox), from: page)
-        let size = CGSize(width: 28, height: 32)
-        let y = isFlipped ? bounds.minY + 8 : bounds.maxY - size.height - 8
-        button.identifier = NSUserInterfaceItemIdentifier(String(index))
-        button.isBookmarked = index == bookmarkedPageIndex
-        button.frame = CGRect(x: pageRect.maxX - size.width - 10, y: y,
-                              width: size.width, height: size.height)
-        button.isHidden = false
+    func positionBookmarkMarkers() {
+        guard let document else { return }
+        let size = CGSize(width: 20, height: 36)
+        for (index, button) in bookmarkButtons {
+            guard let page = document.page(at: index) else { continue }
+            let pageRect = convert(page.bounds(for: displayBox), from: page)
+            let y = isFlipped
+                ? max(pageRect.minY + 4, bounds.minY + 4)
+                : min(pageRect.maxY - size.height - 4, bounds.maxY - size.height - 4)
+            let x = min(pageRect.maxX - size.width - 12, bounds.maxX - size.width - 4)
+            button.frame = CGRect(x: max(bounds.minX + 4, x), y: y,
+                                  width: size.width, height: size.height)
+            button.isHidden = !bounds.intersects(pageRect)
+        }
     }
 
     private func observeScrollChanges() {
@@ -181,7 +219,7 @@ private final class InteractivePDFView: PDFView {
             object: clipView,
             queue: .main
         ) { [weak self] _ in
-            self?.refreshBookmarkMarkerForCurrentPage()
+            self?.positionBookmarkMarkers()
         }
     }
 
@@ -190,13 +228,8 @@ private final class InteractivePDFView: PDFView {
         onKnowledgeAnnotationClick?(id)
     }
 
-    @objc private func bookmarkButtonClicked(_: NSButton) {
-        let viewportCenter = CGPoint(x: bounds.midX, y: bounds.midY)
-        guard let document,
-              let page = page(for: viewportCenter, nearest: true) ?? currentPage else { return }
-        let pageIndex = document.index(for: page)
-        guard pageIndex != NSNotFound else { return }
-        onBookmarkToggle?(pageIndex)
+    @objc private func bookmarkButtonClicked(_ sender: PDFBookmarkButton) {
+        onBookmarkToggle?(sender.pageIndex)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -227,6 +260,8 @@ struct PDFReaderView: NSViewRepresentable {
     func makeNSView(context: Context) -> PDFView {
         let view = InteractivePDFView()
         view.autoScales = true
+        view.minScaleFactor = ReaderZoomBehavior.minimumPDFScale
+        view.maxScaleFactor = ReaderZoomBehavior.maximumPDFScale
         view.displayMode = .singlePageContinuous
         view.displayDirection = .vertical
         view.backgroundColor = NSColor.windowBackgroundColor
@@ -285,7 +320,7 @@ struct PDFReaderView: NSViewRepresentable {
             let index = document.index(for: page)
             if index != NSNotFound {
                 onPageChange(index)
-                (view as? InteractivePDFView)?.refreshBookmarkMarkerForCurrentPage()
+                (view as? InteractivePDFView)?.positionBookmarkMarkers()
             }
         }
 

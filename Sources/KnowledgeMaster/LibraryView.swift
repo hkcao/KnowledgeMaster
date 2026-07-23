@@ -305,28 +305,61 @@ struct LibraryView: View {
             .background(selectedTopicID == topicID ? Color.accentColor.opacity(0.12) : .clear,
                         in: RoundedRectangle(cornerRadius: 5))
             .onTapGesture { selectedTopicID = topicID }
-            .dropDestination(for: String.self) { values, _ in
-                guard let drag = values.compactMap(LibraryDocumentDrag.init).first else { return false }
-                return store.move(documentID: drag.documentID, from: drag.sourceTopicID, to: topicID)
+            .onDrop(of: [.utf8PlainText], isTargeted: nil) {
+                handleDocumentDrop($0, targetTopicID: topicID)
             }
         case .document(let documentID, let topicID):
             if let document = store.data.documents.first(where: { $0.id == documentID }) {
-                Button { onOpen(document) } label: {
-                    HStack(spacing: 7) {
-                        Image(systemName: document.extensionName == ".pdf" ? "doc.richtext" : "doc.text")
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(node.title).lineLimit(1)
-                            if let subtitle = node.subtitle { Text(subtitle).font(.caption2).foregroundStyle(.secondary) }
+                HStack(spacing: 7) {
+                    Image(systemName: document.extensionName == ".pdf" ? "doc.richtext" : "doc.text")
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(node.title).lineLimit(1)
+                        if let subtitle = node.subtitle {
+                            Text(subtitle).font(.caption2).foregroundStyle(.secondary)
                         }
-                        Spacer()
                     }
-                    .contentShape(Rectangle())
-                    .padding(.vertical, 2)
-                    .background(currentDocument?.id == documentID ? Color.accentColor.opacity(0.10) : .clear,
-                                in: RoundedRectangle(cornerRadius: 5))
+                    Spacer()
+                    Image(systemName: "line.3.horizontal")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .help("拖动到其他主题")
                 }
-                .buttonStyle(.plain)
-                .draggable(LibraryDocumentDrag(documentID: documentID, sourceTopicID: topicID).encoded)
+                .contentShape(Rectangle())
+                .padding(.vertical, 2)
+                .background(currentDocument?.id == documentID ? Color.accentColor.opacity(0.10) : .clear,
+                            in: RoundedRectangle(cornerRadius: 5))
+                .onTapGesture { onOpen(document) }
+                .onDrag {
+                    NSItemProvider(object: LibraryDocumentDrag(
+                        documentID: documentID,
+                        sourceTopicID: topicID
+                    ).encoded as NSString)
+                }
+                .contextMenu {
+                    Button("打开", systemImage: "doc.text.magnifyingglass") { onOpen(document) }
+                    if let topicID {
+                        Button("从当前主题移除", systemImage: "folder.badge.minus") {
+                            store.unlink(documentID: documentID, topicID: topicID)
+                        }
+                    }
+                    let targets = store.data.topics
+                        .filter { $0.id != topicID }
+                        .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+                    if !targets.isEmpty {
+                        Menu("移动到主题", systemImage: "folder") {
+                            ForEach(targets) { target in
+                                Button(target.name) {
+                                    _ = store.move(documentID: documentID, from: topicID, to: target.id)
+                                }
+                            }
+                        }
+                    }
+                    if topicID != nil {
+                        Button("移至未分类", systemImage: "tray") {
+                            _ = store.move(documentID: documentID, from: topicID, to: nil)
+                        }
+                    }
+                }
             }
         case .unclassified:
             HStack(spacing: 7) {
@@ -337,11 +370,28 @@ struct LibraryView: View {
             }
             .padding(.vertical, 2)
             .contentShape(Rectangle())
-            .dropDestination(for: String.self) { values, _ in
-                guard let drag = values.compactMap(LibraryDocumentDrag.init).first else { return false }
-                return store.move(documentID: drag.documentID, from: drag.sourceTopicID, to: nil)
+            .onDrop(of: [.utf8PlainText], isTargeted: nil) {
+                handleDocumentDrop($0, targetTopicID: nil)
             }
         }
+    }
+
+    private func handleDocumentDrop(_ providers: [NSItemProvider], targetTopicID: UUID?) -> Bool {
+        guard let provider = providers.first(where: { $0.canLoadObject(ofClass: NSString.self) }) else {
+            return false
+        }
+        provider.loadObject(ofClass: NSString.self) { value, _ in
+            guard let encoded = value as? String,
+                  let drag = LibraryDocumentDrag(encoded) else { return }
+            DispatchQueue.main.async {
+                _ = store.move(
+                    documentID: drag.documentID,
+                    from: drag.sourceTopicID,
+                    to: targetTopicID
+                )
+            }
+        }
+        return true
     }
 
     private func importFiles() {

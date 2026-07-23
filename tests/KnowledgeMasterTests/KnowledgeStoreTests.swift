@@ -369,6 +369,25 @@ final class KnowledgeStoreTests: XCTestCase {
         XCTAssertFalse(store.data.documentTopics.contains(where: { $0.documentId == document.id }))
     }
 
+    func testRemovingDocumentFromCurrentTopicKeepsOtherAssociations() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let input = root.appendingPathComponent("input.txt")
+        try "正文".write(to: input, atomically: true, encoding: .utf8)
+        let store = KnowledgeStore(rootURL: root.appendingPathComponent("library"))
+        _ = store.importFiles([input])
+        let document = try XCTUnwrap(store.data.documents.first)
+        let current = try XCTUnwrap(store.createTopic("当前"))
+        let retained = try XCTUnwrap(store.createTopic("保留"))
+        store.link(documentID: document.id, topicID: current.id)
+        store.link(documentID: document.id, topicID: retained.id)
+
+        store.unlink(documentID: document.id, topicID: current.id)
+
+        XCTAssertFalse(store.documents(for: current.id).contains(where: { $0.id == document.id }))
+        XCTAssertTrue(store.documents(for: retained.id).contains(where: { $0.id == document.id }))
+    }
+
     func testPDFBookmarkPersistsMovesAndTogglesOff() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let input = root.appendingPathComponent("input")
@@ -547,6 +566,18 @@ final class KnowledgeStoreTests: XCTestCase {
         let position = SelectionToolbarLayout.position(anchorX: 600, anchorY: 300, in: CGSize(width: 800, height: 600))
         XCTAssertEqual(position.x + SelectionToolbarLayout.width / 2, 612, accuracy: 0.01)
         XCTAssertEqual(position.y, 272, accuracy: 0.01)
+    }
+
+    func testReaderZoomScaleFollowsMagnificationAndClamps() {
+        XCTAssertEqual(ReaderZoomBehavior.adjustedScale(
+            current: 1, magnification: 0.25, minimum: 0.5, maximum: 3
+        ), 1.25)
+        XCTAssertEqual(ReaderZoomBehavior.adjustedScale(
+            current: 2.8, magnification: 0.5, minimum: 0.5, maximum: 3
+        ), 3)
+        XCTAssertEqual(ReaderZoomBehavior.adjustedScale(
+            current: 0.6, magnification: -0.5, minimum: 0.5, maximum: 3
+        ), 0.5)
     }
 
     func testAgentArgumentsAllowSkillsWithoutExposingTheLibrary() {
