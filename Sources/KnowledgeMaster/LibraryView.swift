@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 private struct LibraryTreeNode: Identifiable {
     enum Kind {
         case topic(UUID)
-        case document(UUID)
+        case document(UUID, topicID: UUID?)
         case unclassified
     }
 
@@ -13,6 +13,35 @@ private struct LibraryTreeNode: Identifiable {
     var title: String
     var subtitle: String?
     var children: [LibraryTreeNode]?
+}
+
+private struct LibraryDocumentDrag {
+    private static let prefix = "knowledge-document:"
+
+    var documentID: UUID
+    var sourceTopicID: UUID?
+
+    var encoded: String {
+        Self.prefix + documentID.uuidString + ":" + (sourceTopicID?.uuidString ?? "unclassified")
+    }
+
+    init(documentID: UUID, sourceTopicID: UUID?) {
+        self.documentID = documentID
+        self.sourceTopicID = sourceTopicID
+    }
+
+    init?(_ encoded: String) {
+        guard encoded.hasPrefix(Self.prefix) else { return nil }
+        let parts = encoded.dropFirst(Self.prefix.count).split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 2, let documentID = UUID(uuidString: String(parts[0])) else { return nil }
+        if parts[1] == "unclassified" {
+            self.init(documentID: documentID, sourceTopicID: nil)
+        } else if let topicID = UUID(uuidString: String(parts[1])) {
+            self.init(documentID: documentID, sourceTopicID: topicID)
+        } else {
+            return nil
+        }
+    }
 }
 
 private enum LibrarySidebarMode: String, CaseIterable, Identifiable {
@@ -32,6 +61,7 @@ struct LibraryView: View {
     @State private var query = ""
     @State private var showNewTopic = false
     @State private var newTopicName = ""
+    @State private var newTopicParentID: UUID?
     @State private var renamingTopic: Topic?
     @State private var renameTopicName = ""
     @State private var deletingTopic: Topic?
@@ -42,6 +72,10 @@ struct LibraryView: View {
     @State private var isDropTarget = false
     @State private var sidebarMode: LibrarySidebarMode = .directory
     @State private var isRenamingPapers = false
+    @State private var showWebImport = false
+    @State private var webURLText = ""
+    @State private var webImportError: String?
+    @State private var isImportingWeb = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -79,10 +113,14 @@ struct LibraryView: View {
                     .allowsHitTesting(false)
             }
         }
-        .alert("新建主题", isPresented: $showNewTopic) {
+        .alert(newTopicParentID == nil ? "新建主题" : "新建子主题", isPresented: $showNewTopic) {
             TextField("主题名称", text: $newTopicName)
-            Button("创建") { store.createTopic(newTopicName); newTopicName = "" }
-            Button("取消", role: .cancel) {}
+            Button("创建") {
+                store.createTopic(newTopicName, parentID: newTopicParentID)
+                newTopicName = ""
+                newTopicParentID = nil
+            }
+            Button("取消", role: .cancel) { newTopicParentID = nil }
         }
         .alert("重命名主题", isPresented: Binding(
             get: { renamingTopic != nil },
@@ -114,6 +152,7 @@ struct LibraryView: View {
             Text("将删除“\(deletingTopic?.name ?? "")”、子主题及其虚拟关联，不会删除原始文档、批注或笔记。")
         }
         .sheet(isPresented: $showRecommendations) { recommendationSheet }
+        .sheet(isPresented: $showWebImport) { webImportSheet }
     }
 
     private var directoryContent: some View {
@@ -122,6 +161,10 @@ struct LibraryView: View {
             HStack {
                 Button("导入文件", systemImage: "plus") { importFiles() }.buttonStyle(.borderedProminent)
                 Button("导入目录") { importFolder() }
+                Button("网页", systemImage: "globe") {
+                    webImportError = nil
+                    showWebImport = true
+                }
                 Spacer()
             }.padding(.horizontal, 10).padding(.top, 10)
             if store.data.documents.contains(where: PaperNamingService.needsRefinement) {
@@ -138,7 +181,18 @@ struct LibraryView: View {
                     Spacer()
                 }.padding(.horizontal, 10).padding(.bottom, 6)
             }
-            HStack { Text("知识目录").font(.caption.bold()).foregroundStyle(.secondary); Spacer(); Button { showNewTopic = true } label: { Image(systemName: "folder.badge.plus") }.buttonStyle(.plain).help("新建主题目录") }
+            HStack {
+                Text("知识目录").font(.caption.bold()).foregroundStyle(.secondary)
+                Spacer()
+                Button {
+                    newTopicParentID = nil
+                    showNewTopic = true
+                } label: {
+                    Image(systemName: "folder.badge.plus")
+                }
+                .buttonStyle(.plain)
+                .help("新建主题目录")
+            }
                 .padding(.horizontal, 12)
             if treeNodes.isEmpty {
                 ContentUnavailableView(query.isEmpty ? "还没有资料" : "没有匹配结果",
@@ -173,7 +227,7 @@ struct LibraryView: View {
                 kind: .unclassified,
                 title: "未分类",
                 subtitle: "\(unclassified.count)",
-                children: unclassified.map { documentNode($0, parentKey: "unclassified") }
+                children: unclassified.map { documentNode($0, parentKey: "unclassified", topicID: nil) }
             ))
         }
         return result
@@ -200,14 +254,14 @@ struct LibraryView: View {
             kind: .topic(topic.id),
             title: topic.name,
             subtitle: "\(store.documents(for: topic.id).count)",
-            children: childTopics + documents.map { documentNode($0, parentKey: topic.id.uuidString) }
+            children: childTopics + documents.map { documentNode($0, parentKey: topic.id.uuidString, topicID: topic.id) }
         )
     }
 
-    private func documentNode(_ document: KnowledgeDocument, parentKey: String) -> LibraryTreeNode {
+    private func documentNode(_ document: KnowledgeDocument, parentKey: String, topicID: UUID?) -> LibraryTreeNode {
         LibraryTreeNode(
             id: "\(parentKey)-document-\(document.id.uuidString)",
-            kind: .document(document.id),
+            kind: .document(document.id, topicID: topicID),
             title: document.displayTitle,
             subtitle: ByteCountFormatter.string(fromByteCount: document.size, countStyle: .file),
             children: nil
@@ -223,6 +277,11 @@ struct LibraryView: View {
                 Spacer()
                 if let subtitle = node.subtitle { Text(subtitle).font(.caption2).foregroundStyle(.secondary) }
                 Menu {
+                    Button("新建子主题…", systemImage: "folder.badge.plus") {
+                        newTopicParentID = topicID
+                        newTopicName = ""
+                        showNewTopic = true
+                    }
                     Button("重命名…", systemImage: "pencil") {
                         guard let topic = store.data.topics.first(where: { $0.id == topicID }) else { return }
                         renameTopicName = topic.name
@@ -247,11 +306,10 @@ struct LibraryView: View {
                         in: RoundedRectangle(cornerRadius: 5))
             .onTapGesture { selectedTopicID = topicID }
             .dropDestination(for: String.self) { values, _ in
-                guard let value = values.first, let documentID = UUID(uuidString: value) else { return false }
-                store.link(documentID: documentID, topicID: topicID)
-                return true
+                guard let drag = values.compactMap(LibraryDocumentDrag.init).first else { return false }
+                return store.move(documentID: drag.documentID, from: drag.sourceTopicID, to: topicID)
             }
-        case .document(let documentID):
+        case .document(let documentID, let topicID):
             if let document = store.data.documents.first(where: { $0.id == documentID }) {
                 Button { onOpen(document) } label: {
                     HStack(spacing: 7) {
@@ -268,7 +326,7 @@ struct LibraryView: View {
                                 in: RoundedRectangle(cornerRadius: 5))
                 }
                 .buttonStyle(.plain)
-                .draggable(documentID.uuidString)
+                .draggable(LibraryDocumentDrag(documentID: documentID, sourceTopicID: topicID).encoded)
             }
         case .unclassified:
             HStack(spacing: 7) {
@@ -278,13 +336,19 @@ struct LibraryView: View {
                 if let subtitle = node.subtitle { Text(subtitle).font(.caption2).foregroundStyle(.secondary) }
             }
             .padding(.vertical, 2)
+            .contentShape(Rectangle())
+            .dropDestination(for: String.self) { values, _ in
+                guard let drag = values.compactMap(LibraryDocumentDrag.init).first else { return false }
+                return store.move(documentID: drag.documentID, from: drag.sourceTopicID, to: nil)
+            }
         }
     }
 
     private func importFiles() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true; panel.canChooseDirectories = false
-        panel.allowedContentTypes = [.pdf, .html, .plainText, UTType(filenameExtension: "md")!]
+        panel.allowedContentTypes = ["pdf", "html", "txt", "md", "doc", "docx"]
+            .compactMap { UTType(filenameExtension: $0) }
         if panel.runModal() == .OK { performImport(panel.urls) }
     }
 
@@ -296,12 +360,71 @@ struct LibraryView: View {
 
     private func performImport(_ urls: [URL]) {
         let before = Set(store.data.documents.map(\.id))
-        importMessage = store.importFiles(urls).joined(separator: " · ")
+        completeImport(before: before, messages: store.importFiles(urls))
+    }
+
+    private func completeImport(before: Set<UUID>, messages: [String], presentRecommendations: Bool = true) {
+        importMessage = messages.joined(separator: " · ")
         recommendedDocuments = store.data.documents.filter { !before.contains($0.id) }
         selectedRecommendations = Set(recommendedDocuments.flatMap { document in
             store.recommendTopics(for: document).map { "\(document.id.uuidString):\($0.name)" }
         })
-        showRecommendations = !recommendedDocuments.isEmpty
+        if presentRecommendations {
+            showRecommendations = !recommendedDocuments.isEmpty
+        }
+    }
+
+    private func importWebPage() async {
+        isImportingWeb = true
+        webImportError = nil
+        defer { isImportingWeb = false }
+        do {
+            let page = try await WebPageImporter.fetch(from: webURLText)
+            let before = Set(store.data.documents.map(\.id))
+            let messages = store.importWebPage(page.content, sourceURL: page.sourceURL)
+            completeImport(before: before, messages: messages, presentRecommendations: false)
+            if store.data.documents.contains(where: { !before.contains($0.id) }) {
+                showWebImport = false
+                webURLText = ""
+                DispatchQueue.main.async {
+                    showRecommendations = !recommendedDocuments.isEmpty
+                }
+            } else {
+                webImportError = messages.joined(separator: " · ")
+            }
+        } catch {
+            webImportError = error.localizedDescription
+        }
+    }
+
+    private var webImportSheet: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("导入网页").font(.title2.bold())
+            Text("网页将以 HTML 原文保存，正文可阅读、检索并用于 AI 问答。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            TextField("https://example.com/article", text: $webURLText)
+                .textFieldStyle(.roundedBorder)
+                .disabled(isImportingWeb)
+                .onSubmit { Task { await importWebPage() } }
+            if let webImportError {
+                Text(webImportError).font(.caption).foregroundStyle(.red)
+            }
+            HStack {
+                if isImportingWeb {
+                    ProgressView().controlSize(.small)
+                    Text("正在下载并提取正文…").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("取消") { showWebImport = false }
+                    .disabled(isImportingWeb)
+                Button("导入") { Task { await importWebPage() } }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isImportingWeb || webURLText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(22)
+        .frame(width: 520)
     }
 
     @MainActor private func refinePaperNames() async {

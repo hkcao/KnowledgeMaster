@@ -180,6 +180,7 @@ final class KnowledgeStoreTests: XCTestCase {
             .write(to: root.appendingPathComponent("knowledge.json"), atomically: true, encoding: .utf8)
         let store = KnowledgeStore(rootURL: root)
         XCTAssertTrue(store.data.annotations.isEmpty)
+        XCTAssertTrue(store.data.bookmarks.isEmpty)
     }
 
     func testCrossDocumentContextKeepsEverySelectedDocument() throws {
@@ -310,6 +311,122 @@ final class KnowledgeStoreTests: XCTestCase {
 
         let files = DocumentExtractor.importableFiles(from: [root])
         XCTAssertEqual(files.map(\.lastPathComponent), ["note.md"])
+    }
+
+    func testWordDocumentsAreDiscoveredAndExtracted() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let source = NSAttributedString(string: "Word 文档正文")
+
+        for (name, type) in [("sample.doc", NSAttributedString.DocumentType.docFormat),
+                             ("sample.docx", NSAttributedString.DocumentType.officeOpenXML)] {
+            let url = root.appendingPathComponent(name)
+            let data = try source.data(
+                from: NSRange(location: 0, length: source.length),
+                documentAttributes: [.documentType: type]
+            )
+            try data.write(to: url)
+            XCTAssertTrue(DocumentExtractor.importableFiles(from: [url]).contains(url))
+            XCTAssertEqual(try DocumentExtractor.extract(url).text.trimmingCharacters(in: .whitespacesAndNewlines),
+                           "Word 文档正文")
+        }
+    }
+
+    func testMovingDocumentBetweenTopicsReplacesOnlyDraggedAssociation() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let input = root.appendingPathComponent("input.txt")
+        try "正文".write(to: input, atomically: true, encoding: .utf8)
+        let store = KnowledgeStore(rootURL: root.appendingPathComponent("library"))
+        _ = store.importFiles([input])
+        let document = try XCTUnwrap(store.data.documents.first)
+        let source = try XCTUnwrap(store.createTopic("来源"))
+        let target = try XCTUnwrap(store.createTopic("目标"))
+        let retained = try XCTUnwrap(store.createTopic("保留"))
+        store.link(documentID: document.id, topicID: source.id)
+        store.link(documentID: document.id, topicID: retained.id)
+
+        XCTAssertTrue(store.move(documentID: document.id, from: source.id, to: target.id))
+        XCTAssertFalse(store.documents(for: source.id).contains(where: { $0.id == document.id }))
+        XCTAssertTrue(store.documents(for: target.id).contains(where: { $0.id == document.id }))
+        XCTAssertTrue(store.documents(for: retained.id).contains(where: { $0.id == document.id }))
+    }
+
+    func testMovingDocumentToUnclassifiedRemovesAllTopicAssociations() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let input = root.appendingPathComponent("input.txt")
+        try "正文".write(to: input, atomically: true, encoding: .utf8)
+        let store = KnowledgeStore(rootURL: root.appendingPathComponent("library"))
+        _ = store.importFiles([input])
+        let document = try XCTUnwrap(store.data.documents.first)
+        let first = try XCTUnwrap(store.createTopic("主题一"))
+        let second = try XCTUnwrap(store.createTopic("主题二"))
+        store.link(documentID: document.id, topicID: first.id)
+        store.link(documentID: document.id, topicID: second.id)
+
+        XCTAssertTrue(store.move(documentID: document.id, from: first.id, to: nil))
+        XCTAssertFalse(store.data.documentTopics.contains(where: { $0.documentId == document.id }))
+    }
+
+    func testPDFBookmarkPersistsMovesAndTogglesOff() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let input = root.appendingPathComponent("input")
+        try FileManager.default.createDirectory(at: input, withIntermediateDirectories: true)
+        let pdfURL = input.appendingPathComponent("bookmark.pdf")
+        var mediaBox = CGRect(x: 0, y: 0, width: 300, height: 400)
+        let consumer = try XCTUnwrap(CGDataConsumer(url: pdfURL as CFURL))
+        let context = try XCTUnwrap(CGContext(consumer: consumer, mediaBox: &mediaBox, nil))
+        context.beginPDFPage(nil)
+        context.endPDFPage()
+        context.beginPDFPage(nil)
+        context.endPDFPage()
+        context.closePDF()
+
+        let library = root.appendingPathComponent("library")
+        let store = KnowledgeStore(rootURL: library)
+        _ = store.importFiles([pdfURL])
+        let document = try XCTUnwrap(store.data.documents.first)
+        XCTAssertEqual(document.pageCount, 2)
+
+        XCTAssertTrue(store.toggleBookmark(documentID: document.id, pageIndex: 1))
+        XCTAssertEqual(store.bookmarkPage(for: document.id), 1)
+        let reloaded = KnowledgeStore(rootURL: library)
+        XCTAssertEqual(reloaded.bookmarkPage(for: document.id), 1)
+
+        XCTAssertTrue(reloaded.toggleBookmark(documentID: document.id, pageIndex: 0))
+        XCTAssertEqual(reloaded.bookmarkPage(for: document.id), 0)
+        XCTAssertFalse(reloaded.toggleBookmark(documentID: document.id, pageIndex: 0))
+        XCTAssertNil(reloaded.bookmarkPage(for: document.id))
+    }
+
+    func testWebPageHTMLImportsWithTitleSourceAndSearchableBody() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let store = KnowledgeStore(rootURL: root)
+        let sourceURL = try XCTUnwrap(URL(string: "https://example.com/research/article"))
+        let html = Data("""
+        <!doctype html><html><head><title>网页研究资料</title></head>
+        <body><h1>核心结论</h1><p>混合检索结合关键词和语义召回。</p></body></html>
+        """.utf8)
+
+        XCTAssertTrue(store.importWebPage(html, sourceURL: sourceURL).first?.hasPrefix("已导入") == true)
+        let document = try XCTUnwrap(store.data.documents.first)
+        XCTAssertEqual(document.extensionName, ".html")
+        XCTAssertEqual(document.displayTitle, "网页研究资料")
+        XCTAssertEqual(document.sourceURL, sourceURL.absoluteString)
+        XCTAssertTrue(store.extractedContent(for: document.id).text.contains("混合检索"))
+        XCTAssertEqual(store.search("语义召回", topicID: nil).map(\.id), [document.id])
+
+        let reloaded = KnowledgeStore(rootURL: root)
+        XCTAssertEqual(reloaded.data.documents.first?.sourceURL, sourceURL.absoluteString)
+    }
+
+    func testWebPageURLNormalizationAcceptsHostAndRejectsNonWebSchemes() {
+        XCTAssertEqual(WebPageImporter.normalizedURL(from: "example.com/path")?.absoluteString,
+                       "https://example.com/path")
+        XCTAssertEqual(WebPageImporter.normalizedURL(from: "http://example.com")?.scheme, "http")
+        XCTAssertNil(WebPageImporter.normalizedURL(from: "file:///tmp/page.html"))
+        XCTAssertNil(WebPageImporter.normalizedURL(from: "   "))
     }
 
     func testChatMarkdownPreservesBlocksAndRendersLaTeXOffline() {

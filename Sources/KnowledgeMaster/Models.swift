@@ -62,10 +62,11 @@ enum APIContextMode: String, Codable, CaseIterable, Identifiable {
 }
 
 struct KnowledgeData: Codable {
-    var version: Int = 4
+    var version: Int = 5
     var documents: [KnowledgeDocument] = []
     var topics: [Topic] = []
     var documentTopics: [DocumentTopic] = []
+    var bookmarks: [DocumentBookmark] = []
     var annotations: [KnowledgeAnnotation] = []
     var conversations: [Conversation] = []
     var topicSummaries: [TopicSummary] = []
@@ -75,10 +76,11 @@ struct KnowledgeData: Codable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        version = try container.decodeIfPresent(Int.self, forKey: .version) ?? 4
+        version = try container.decodeIfPresent(Int.self, forKey: .version) ?? 5
         documents = try container.decodeIfPresent([KnowledgeDocument].self, forKey: .documents) ?? []
         topics = try container.decodeIfPresent([Topic].self, forKey: .topics) ?? []
         documentTopics = try container.decodeIfPresent([DocumentTopic].self, forKey: .documentTopics) ?? []
+        bookmarks = try container.decodeIfPresent([DocumentBookmark].self, forKey: .bookmarks) ?? []
         annotations = try container.decodeIfPresent([KnowledgeAnnotation].self, forKey: .annotations) ?? []
         conversations = try container.decodeIfPresent([Conversation].self, forKey: .conversations) ?? []
         topicSummaries = try container.decodeIfPresent([TopicSummary].self, forKey: .topicSummaries) ?? []
@@ -98,14 +100,16 @@ struct KnowledgeDocument: Codable, Identifiable, Hashable {
     var status: String
     var pageCount: Int?
     var error: String?
+    var sourceURL: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, displayName, size, sha256, storedPath, importedAt, status, pageCount, error
+        case id, name, displayName, size, sha256, storedPath, importedAt, status, pageCount, error, sourceURL
         case extensionName = "extension"
     }
 
     init(id: UUID = UUID(), name: String, displayName: String? = nil, extensionName: String, size: Int64, sha256: String,
-         storedPath: String?, importedAt: Date = Date(), status: String = "ready", pageCount: Int? = nil) {
+         storedPath: String?, importedAt: Date = Date(), status: String = "ready", pageCount: Int? = nil,
+         sourceURL: String? = nil) {
         self.id = id
         self.name = name
         self.displayName = displayName
@@ -116,6 +120,7 @@ struct KnowledgeDocument: Codable, Identifiable, Hashable {
         self.importedAt = importedAt
         self.status = status
         self.pageCount = pageCount
+        self.sourceURL = sourceURL
     }
 
     var displayTitle: String {
@@ -142,6 +147,12 @@ struct DocumentTopic: Codable, Hashable {
     var documentId: UUID
     var topicId: UUID
     var createdAt: Date
+}
+
+struct DocumentBookmark: Codable, Hashable {
+    var documentId: UUID
+    var pageIndex: Int
+    var updatedAt: Date
 }
 
 struct AnnotationRect: Codable, Hashable {

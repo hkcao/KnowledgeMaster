@@ -3,7 +3,7 @@ import PDFKit
 import AppKit
 
 enum DocumentExtractor {
-    static let supportedExtensions = Set(["pdf", "html", "htm", "md", "markdown", "txt"])
+    static let supportedExtensions = Set(["pdf", "html", "htm", "md", "markdown", "txt", "doc", "docx"])
 
     static func importableFiles(from urls: [URL], manager: FileManager = .default) -> [URL] {
         var result: [URL] = []
@@ -31,16 +31,67 @@ enum DocumentExtractor {
             return ExtractedDocument(text: pages.map(\.text).joined(separator: "\n\n"), pages: pages)
         case "html", "htm":
             let data = try Data(contentsOf: url)
-            let attributed = try NSAttributedString(
-                data: data,
-                options: [.documentType: NSAttributedString.DocumentType.html,
-                          .characterEncoding: String.Encoding.utf8.rawValue],
-                documentAttributes: nil
-            )
+            let attributed = try attributedHTML(from: data)
             return ExtractedDocument(text: attributed.string, pages: [])
+        case "doc", "docx":
+            return ExtractedDocument(text: try attributedWordDocument(at: url).string, pages: [])
         default:
             return ExtractedDocument(text: try String(contentsOf: url, encoding: .utf8), pages: [])
         }
+    }
+
+    static func attributedWordDocument(at url: URL) throws -> NSAttributedString {
+        let type: NSAttributedString.DocumentType = url.pathExtension.lowercased() == "docx" ? .officeOpenXML : .docFormat
+        return try NSAttributedString(
+            data: Data(contentsOf: url),
+            options: [.documentType: type],
+            documentAttributes: nil
+        )
+    }
+
+    static func htmlTitle(from data: Data) -> String? {
+        if let source = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1),
+           let regex = try? NSRegularExpression(
+                pattern: #"<title\b[^>]*>(.*?)</title>"#,
+                options: [.caseInsensitive, .dotMatchesLineSeparators]
+           ),
+           let match = regex.firstMatch(in: source, range: NSRange(source.startIndex..., in: source)),
+           let range = Range(match.range(at: 1), in: source) {
+            let fragment = "<html><body>\(source[range])</body></html>"
+            if let fragmentData = fragment.data(using: .utf8),
+               let value = try? attributedHTML(from: fragmentData).string
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+               !value.isEmpty {
+                return value
+            }
+        }
+        var attributes: NSDictionary?
+        _ = try? NSAttributedString(
+            data: data,
+            options: htmlReadingOptions(for: data),
+            documentAttributes: &attributes
+        )
+        let title = (attributes?[NSAttributedString.DocumentAttributeKey.title] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return title?.isEmpty == false ? title : nil
+    }
+
+    static func attributedHTML(from data: Data, baseURL: URL? = nil) throws -> NSAttributedString {
+        var options = htmlReadingOptions(for: data)
+        if let baseURL { options[.baseURL] = baseURL }
+        return try NSAttributedString(data: data, options: options, documentAttributes: nil)
+    }
+
+    private static func htmlReadingOptions(for data: Data) -> [NSAttributedString.DocumentReadingOptionKey: Any] {
+        var options: [NSAttributedString.DocumentReadingOptionKey: Any] = [
+            .documentType: NSAttributedString.DocumentType.html
+        ]
+        let prefix = String(data: data.prefix(4_096), encoding: .ascii)?.lowercased() ?? ""
+        let declaresEncoding = prefix.contains("charset=") || prefix.contains("charset =")
+        if !declaresEncoding, String(data: data, encoding: .utf8) != nil {
+            options[.characterEncoding] = String.Encoding.utf8.rawValue
+        }
+        return options
     }
 
     static func paperDisplayName(at url: URL) -> String? {

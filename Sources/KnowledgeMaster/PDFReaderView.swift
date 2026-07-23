@@ -1,10 +1,83 @@
 import SwiftUI
 import PDFKit
 
+private final class PDFBookmarkButton: NSButton {
+    var isBookmarked = false {
+        didSet {
+            toolTip = isBookmarked ? "取消本页书签" : "将本页设为书签"
+            let configuration = NSImage.SymbolConfiguration(pointSize: 20, weight: .semibold)
+            image = isBookmarked
+                ? NSImage(systemSymbolName: "bookmark.fill", accessibilityDescription: "本页书签")?
+                    .withSymbolConfiguration(configuration)
+                : nil
+            needsDisplay = true
+        }
+    }
+    private var isHovered = false
+    private var trackingAreaValue: NSTrackingArea?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        isBordered = false
+        title = ""
+        imagePosition = .imageOnly
+        contentTintColor = .systemOrange
+        focusRingType = .none
+        toolTip = "将本页设为书签"
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+    }
+
+    override func updateTrackingAreas() {
+        if let trackingAreaValue { removeTrackingArea(trackingAreaValue) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        trackingAreaValue = area
+        super.updateTrackingAreas()
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        needsDisplay = true
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        if !isBookmarked && isHovered {
+            NSColor.controlAccentColor.withAlphaComponent(0.75).setStroke()
+            let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 2, dy: 2), xRadius: 5, yRadius: 5)
+            path.lineWidth = 1.5
+            path.setLineDash([4, 3], count: 2, phase: 0)
+            path.stroke()
+        }
+    }
+}
+
 private final class InteractivePDFView: PDFView {
     var onKnowledgeAnnotationClick: ((UUID) -> Void)?
+    var onBookmarkToggle: ((Int) -> Void)?
     private var markerAnchors: [UUID: AnnotationRect] = [:]
     private var markerButtons: [UUID: NSButton] = [:]
+    private var bookmarkButton: PDFBookmarkButton?
+    private var bookmarkedPageIndex: Int?
+    private var scrollObserver: NSObjectProtocol?
+
+    deinit {
+        if let scrollObserver {
+            NotificationCenter.default.removeObserver(scrollObserver)
+        }
+    }
 
     func updateAnnotationMarkers(_ annotations: [KnowledgeAnnotation]) {
         guard let document else { return }
@@ -35,9 +108,33 @@ private final class InteractivePDFView: PDFView {
         positionAnnotationMarkers()
     }
 
+    func resetBookmarkMarkers() {
+        bookmarkButton?.removeFromSuperview()
+        bookmarkButton = nil
+        bookmarkedPageIndex = nil
+    }
+
+    func updateBookmarkMarkers(bookmarkedPageIndex: Int?) {
+        guard document != nil else {
+            resetBookmarkMarkers()
+            return
+        }
+        self.bookmarkedPageIndex = bookmarkedPageIndex
+        if bookmarkButton == nil {
+            let button = PDFBookmarkButton(frame: .zero)
+            button.target = self
+            button.action = #selector(bookmarkButtonClicked(_:))
+            addSubview(button)
+            bookmarkButton = button
+        }
+        observeScrollChanges()
+        refreshBookmarkMarkerForCurrentPage()
+    }
+
     override func layout() {
         super.layout()
         positionAnnotationMarkers()
+        refreshBookmarkMarkerForCurrentPage()
     }
 
     private func positionAnnotationMarkers() {
@@ -58,9 +155,48 @@ private final class InteractivePDFView: PDFView {
         }
     }
 
+    func refreshBookmarkMarkerForCurrentPage() {
+        let viewportCenter = CGPoint(x: bounds.midX, y: bounds.midY)
+        guard let document,
+              let page = page(for: viewportCenter, nearest: true) ?? currentPage,
+              let button = bookmarkButton else { return }
+        let index = document.index(for: page)
+        guard index != NSNotFound else { return }
+        let pageRect = convert(page.bounds(for: displayBox), from: page)
+        let size = CGSize(width: 28, height: 32)
+        let y = isFlipped ? bounds.minY + 8 : bounds.maxY - size.height - 8
+        button.identifier = NSUserInterfaceItemIdentifier(String(index))
+        button.isBookmarked = index == bookmarkedPageIndex
+        button.frame = CGRect(x: pageRect.maxX - size.width - 10, y: y,
+                              width: size.width, height: size.height)
+        button.isHidden = false
+    }
+
+    private func observeScrollChanges() {
+        guard scrollObserver == nil,
+              let clipView = documentView?.enclosingScrollView?.contentView else { return }
+        clipView.postsBoundsChangedNotifications = true
+        scrollObserver = NotificationCenter.default.addObserver(
+            forName: NSView.boundsDidChangeNotification,
+            object: clipView,
+            queue: .main
+        ) { [weak self] _ in
+            self?.refreshBookmarkMarkerForCurrentPage()
+        }
+    }
+
     @objc private func annotationButtonClicked(_ sender: NSButton) {
         guard let value = sender.identifier?.rawValue, let id = UUID(uuidString: value) else { return }
         onKnowledgeAnnotationClick?(id)
+    }
+
+    @objc private func bookmarkButtonClicked(_: NSButton) {
+        let viewportCenter = CGPoint(x: bounds.midX, y: bounds.midY)
+        guard let document,
+              let page = page(for: viewportCenter, nearest: true) ?? currentPage else { return }
+        let pageIndex = document.index(for: page)
+        guard pageIndex != NSNotFound else { return }
+        onBookmarkToggle?(pageIndex)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -80,8 +216,10 @@ struct PDFReaderView: NSViewRepresentable {
     var annotations: [KnowledgeAnnotation]
     var focusedAnnotationID: UUID?
     var navigationRequest: DocumentNavigationRequest?
+    var bookmarkPageIndex: Int?
     var onSelection: (ReaderSelection?) -> Void
     var onPageChange: (Int) -> Void
+    var onBookmarkToggle: (Int) -> Void
     var onAnnotationClick: (UUID) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(onSelection: onSelection) }
@@ -99,13 +237,21 @@ struct PDFReaderView: NSViewRepresentable {
     func updateNSView(_ view: PDFView, context: Context) {
         context.coordinator.onSelection = onSelection
         context.coordinator.onPageChange = onPageChange
-        (view as? InteractivePDFView)?.onKnowledgeAnnotationClick = onAnnotationClick
-        if context.coordinator.url != url {
+        let interactiveView = view as? InteractivePDFView
+        interactiveView?.onKnowledgeAnnotationClick = onAnnotationClick
+        interactiveView?.onBookmarkToggle = onBookmarkToggle
+        let documentChanged = context.coordinator.url != url
+        if documentChanged {
             context.coordinator.url = url
+            interactiveView?.resetBookmarkMarkers()
             view.document = PDFDocument(url: url)
         }
         context.coordinator.render(annotations: annotations, in: view)
-        (view as? InteractivePDFView)?.updateAnnotationMarkers(annotations)
+        interactiveView?.updateAnnotationMarkers(annotations)
+        interactiveView?.updateBookmarkMarkers(bookmarkedPageIndex: bookmarkPageIndex)
+        if documentChanged {
+            context.coordinator.restoreBookmark(pageIndex: bookmarkPageIndex, in: view)
+        }
         context.coordinator.focus(annotationID: focusedAnnotationID, annotations: annotations, in: view)
         context.coordinator.navigate(navigationRequest, in: view)
     }
@@ -137,7 +283,10 @@ struct PDFReaderView: NSViewRepresentable {
         private func pageChanged() {
             guard let view, let document = view.document, let page = view.currentPage else { return }
             let index = document.index(for: page)
-            if index != NSNotFound { onPageChange(index) }
+            if index != NSNotFound {
+                onPageChange(index)
+                (view as? InteractivePDFView)?.refreshBookmarkMarkerForCurrentPage()
+            }
         }
 
         private func selectionChanged() {
@@ -190,6 +339,12 @@ struct PDFReaderView: NSViewRepresentable {
             } else {
                 view.go(to: page)
             }
+        }
+
+        func restoreBookmark(pageIndex: Int?, in view: PDFView) {
+            guard let pageIndex,
+                  let page = view.document?.page(at: pageIndex) else { return }
+            view.go(to: page)
         }
     }
 }

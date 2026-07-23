@@ -112,7 +112,7 @@ final class KnowledgeStore: ObservableObject {
             return
         }
         data = try decoder.decode(KnowledgeData.self, from: Data(contentsOf: metadataURL))
-        data.version = 4
+        data.version = 5
         if try migrateSummaryNotesToMarkdown() { try save() }
     }
 
@@ -216,6 +216,7 @@ final class KnowledgeStore: ObservableObject {
         try? manager.removeItem(at: indexURL.appendingPathComponent("\(id.uuidString).json"))
         data.documents.removeAll { $0.id == id }
         data.documentTopics.removeAll { $0.documentId == id }
+        data.bookmarks.removeAll { $0.documentId == id }
         let removedAnnotationIDs = Set(data.annotations.filter { $0.documentId == id }.map(\.id))
         data.annotations.removeAll { $0.documentId == id }
         for index in data.summaryNotes.indices {
@@ -238,7 +239,8 @@ final class KnowledgeStore: ObservableObject {
     @discardableResult
     func createTopic(_ name: String, parentID: UUID? = nil) -> Topic? {
         let value = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty else { return nil }
+        guard !value.isEmpty,
+              parentID == nil || data.topics.contains(where: { $0.id == parentID }) else { return nil }
         let topic = Topic(name: value, parentId: parentID)
         data.topics.append(topic)
         try? save()
@@ -278,6 +280,85 @@ final class KnowledgeStore: ObservableObject {
     func unlink(documentID: UUID, topicID: UUID) {
         data.documentTopics.removeAll { $0.documentId == documentID && $0.topicId == topicID }
         try? save()
+    }
+
+    @discardableResult
+    func move(documentID: UUID, from sourceTopicID: UUID?, to targetTopicID: UUID?) -> Bool {
+        guard data.documents.contains(where: { $0.id == documentID }) else { return false }
+        if let targetTopicID,
+           !data.topics.contains(where: { $0.id == targetTopicID }) {
+            return false
+        }
+        if sourceTopicID == targetTopicID { return false }
+
+        if let targetTopicID,
+           !data.documentTopics.contains(where: { $0.documentId == documentID && $0.topicId == targetTopicID }) {
+            data.documentTopics.append(DocumentTopic(documentId: documentID, topicId: targetTopicID, createdAt: Date()))
+        }
+        if let sourceTopicID {
+            data.documentTopics.removeAll { $0.documentId == documentID && $0.topicId == sourceTopicID }
+        } else if targetTopicID == nil {
+            return false
+        }
+        if targetTopicID == nil {
+            data.documentTopics.removeAll { $0.documentId == documentID }
+        }
+        try? save()
+        return true
+    }
+
+    func bookmarkPage(for documentID: UUID) -> Int? {
+        data.bookmarks.first(where: { $0.documentId == documentID })?.pageIndex
+    }
+
+    @discardableResult
+    func toggleBookmark(documentID: UUID, pageIndex: Int) -> Bool {
+        guard pageIndex >= 0,
+              let document = data.documents.first(where: { $0.id == documentID }),
+              document.extensionName == ".pdf",
+              document.pageCount.map({ pageIndex < $0 }) ?? true else { return false }
+        if let index = data.bookmarks.firstIndex(where: { $0.documentId == documentID }) {
+            if data.bookmarks[index].pageIndex == pageIndex {
+                data.bookmarks.remove(at: index)
+                try? save()
+                return false
+            }
+            data.bookmarks[index].pageIndex = pageIndex
+            data.bookmarks[index].updatedAt = Date()
+        } else {
+            data.bookmarks.append(DocumentBookmark(documentId: documentID, pageIndex: pageIndex, updatedAt: Date()))
+        }
+        try? save()
+        return true
+    }
+
+    @discardableResult
+    func importWebPage(_ content: Data, sourceURL: URL) -> [String] {
+        guard ["http", "https"].contains(sourceURL.scheme?.lowercased() ?? "") else {
+            return ["导入失败：只支持 HTTP 或 HTTPS 网址"]
+        }
+        let digest = SHA256.hash(data: Data(sourceURL.absoluteString.utf8))
+            .map { String(format: "%02x", $0) }.joined().prefix(10)
+        let host = (sourceURL.host ?? "web")
+            .replacingOccurrences(of: #"[^A-Za-z0-9.-]+"#, with: "-", options: .regularExpression)
+        let filename = "web-\(host)-\(digest).html"
+        let temporaryDirectory = manager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let temporaryFile = temporaryDirectory.appendingPathComponent(filename)
+        do {
+            try manager.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+            defer { try? manager.removeItem(at: temporaryDirectory) }
+            try content.write(to: temporaryFile, options: .atomic)
+            let existingIDs = Set(data.documents.map(\.id))
+            let messages = importFiles([temporaryFile])
+            if let index = data.documents.firstIndex(where: { !existingIDs.contains($0.id) }) {
+                data.documents[index].displayName = DocumentExtractor.htmlTitle(from: content)
+                data.documents[index].sourceURL = sourceURL.absoluteString
+                try? save()
+            }
+            return messages
+        } catch {
+            return ["导入失败：\(error.localizedDescription)"]
+        }
     }
 
     func documents(for topicID: UUID?) -> [KnowledgeDocument] {

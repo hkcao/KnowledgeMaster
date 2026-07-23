@@ -43,7 +43,7 @@ struct ReaderView: View {
                     .task(id: document.id) { loadOutline(document) }
             } else {
                 ContentUnavailableView("选择一份资料", systemImage: "doc.text.magnifyingglass",
-                                       description: Text("导入或从左侧打开 PDF、HTML、Markdown 和文本文件。"))
+                                       description: Text("导入或从左侧打开 PDF、Word、HTML、Markdown 和文本文件。"))
             }
         }
         .sheet(item: $editingAnnotation) { annotation in noteEditor(annotation) }
@@ -153,7 +153,9 @@ struct ReaderView: View {
         if document.extensionName == ".pdf" {
             PDFReaderView(url: store.storedURL(for: document), annotations: annotations,
                           focusedAnnotationID: focusedAnnotationID, navigationRequest: navigationRequest,
+                          bookmarkPageIndex: store.bookmarkPage(for: document.id),
                           onSelection: { selection = $0 }, onPageChange: { currentPDFPageIndex = $0 },
+                          onBookmarkToggle: { store.toggleBookmark(documentID: document.id, pageIndex: $0) },
                           onAnnotationClick: openAnnotation)
         } else {
             RichTextReaderView(content: attributedContent(document), annotations: annotations,
@@ -311,9 +313,11 @@ struct ReaderView: View {
            let markdown = try? AttributedString(markdown: extracted.text, options: .init(interpretedSyntax: .full)) {
             base = NSAttributedString(markdown)
         } else if [".html", ".htm"].contains(document.extensionName),
-                  let data = try? Data(contentsOf: store.storedURL(for: document)),
-                  let html = try? NSAttributedString(data: data, options: [.documentType: NSAttributedString.DocumentType.html], documentAttributes: nil) {
+                  let html = try? htmlContent(document) {
             base = html
+        } else if [".doc", ".docx"].contains(document.extensionName),
+                  let word = try? DocumentExtractor.attributedWordDocument(at: store.storedURL(for: document)) {
+            base = word
         } else {
             base = NSAttributedString(string: extracted.text)
         }
@@ -326,6 +330,14 @@ struct ReaderView: View {
             if color == nil { value.addAttribute(.foregroundColor, value: NSColor.labelColor, range: range) }
         }
         return value
+    }
+
+    private func htmlContent(_ document: KnowledgeDocument) throws -> NSAttributedString {
+        let data = try Data(contentsOf: store.storedURL(for: document))
+        return try DocumentExtractor.attributedHTML(
+            from: data,
+            baseURL: document.sourceURL.flatMap(URL.init(string:))
+        )
     }
 
     private func metadata(_ document: KnowledgeDocument) -> String {
