@@ -4,3 +4,7 @@ release/
 test_data/
 *.dmg
 *.zip
+windows/node_modules/
+windows/out/
+windows/release/
+windows/.cache/
