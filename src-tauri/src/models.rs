@@ -3,6 +3,7 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct KnowledgeData {
     #[serde(default = "default_version")]
     pub version: i32,
@@ -43,9 +44,11 @@ impl KnowledgeData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct KnowledgeDocument {
     pub id: Uuid,
     pub name: String,
+    #[serde(default)]
     pub display_name: Option<String>,
     #[serde(rename = "extension")]
     pub extension_name: String,
@@ -74,6 +77,7 @@ impl KnowledgeDocument {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct Topic {
     pub id: Uuid,
     pub name: String,
@@ -83,6 +87,7 @@ pub struct Topic {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct DocumentTopic {
     pub document_id: Uuid,
     pub topic_id: Uuid,
@@ -90,6 +95,7 @@ pub struct DocumentTopic {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct DocumentBookmark {
     pub document_id: Uuid,
     pub page_index: i32,
@@ -106,6 +112,7 @@ pub struct AnnotationRect {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct KnowledgeAnnotation {
     pub id: Uuid,
     pub document_id: Uuid,
@@ -122,6 +129,7 @@ pub struct KnowledgeAnnotation {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct ChatMessage {
     pub id: Uuid,
     pub role: String,
@@ -144,6 +152,7 @@ pub struct ChatMessage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct AgentTraceEvent {
     pub id: Uuid,
     pub kind: String,
@@ -154,6 +163,7 @@ pub struct AgentTraceEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct AgentSessionState {
     pub id: String,
     pub scope_signature: String,
@@ -161,6 +171,7 @@ pub struct AgentSessionState {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct Conversation {
     pub id: Uuid,
     #[serde(default = "default_title")]
@@ -191,6 +202,7 @@ fn default_title() -> String { "新对话".to_string() }
 fn default_true() -> bool { true }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct TopicSummary {
     pub topic_id: Uuid,
     pub summary: String,
@@ -198,6 +210,7 @@ pub struct TopicSummary {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct SummaryNote {
     pub id: Uuid,
     pub title: String,
@@ -205,6 +218,7 @@ pub struct SummaryNote {
     pub content: String,
     #[serde(default)]
     pub stored_path: Option<String>,
+    #[serde(rename = "annotationIDs")]
     #[serde(default)]
     pub annotation_ids: Vec<Uuid>,
     pub created_at: DateTime<Utc>,
@@ -212,6 +226,7 @@ pub struct SummaryNote {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct ReaderQuote {
     pub text: String,
     #[serde(default)]
@@ -222,6 +237,7 @@ pub struct ReaderQuote {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct ContextChunk {
     pub id: Uuid,
     pub label: String,
@@ -320,15 +336,30 @@ pub enum DocumentNavigationTarget {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AppSettings {
+    #[serde(default = "default_provider")]
     pub provider: String,
+    #[serde(default = "default_base_url")]
     pub base_url: String,
+    #[serde(default = "default_model")]
     pub model: String,
+    #[serde(default = "default_backend")]
     pub chat_backend: String,
+    #[serde(default = "default_placement")]
     pub chat_placement: String,
+    #[serde(default = "default_true")]
     pub library_visible: bool,
+    #[serde(default = "default_context_mode")]
     pub api_context_mode: String,
+    #[serde(default)]
     pub vision_enabled: bool,
 }
+
+fn default_provider() -> String { "deepseek".into() }
+fn default_base_url() -> String { "https://api.deepseek.com".into() }
+fn default_model() -> String { "deepseek-chat".into() }
+fn default_backend() -> String { "direct".into() }
+fn default_placement() -> String { "right".into() }
+fn default_context_mode() -> String { "relevant_fragments".into() }
 
 impl Default for AppSettings {
     fn default() -> Self {

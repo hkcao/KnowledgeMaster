@@ -162,10 +162,11 @@ impl KnowledgeStore {
             }
             fs::copy(source, &destination)?;
 
-            let extracted = crate::extraction::extract(&destination)?;
+            let extracted = crate::extraction::extract(&destination)
+                .unwrap_or_else(|_| ExtractedDocument { text: String::new(), pages: Vec::new() });
             let index_path = self.index_dir().join(format!("{}.json", id));
-            let index_json = serde_json::to_string_pretty(&extracted)?;
-            fs::write(&index_path, index_json)?;
+            let index_json = serde_json::to_string_pretty(&extracted).unwrap_or_default();
+            let _ = fs::write(&index_path, index_json);
 
             let display_name = if ext == "pdf" {
                 crate::extraction::paper_display_name_at(&destination)
