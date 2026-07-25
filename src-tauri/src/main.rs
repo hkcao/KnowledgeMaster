@@ -3,8 +3,7 @@
 use std::sync::Mutex;
 use tauri::Manager;
 use knowledge_master_lib::store::KnowledgeStore;
-
-struct AppState(Mutex<KnowledgeStore>);
+use knowledge_master_lib::commands::library::AppState;
 
 fn main() {
     tauri::Builder::default()
