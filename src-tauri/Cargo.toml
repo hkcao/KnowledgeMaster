@@ -1,0 +1,49 @@
+[package]
+name = "knowledge-master"
+version = "2.0.0"
+description = "知屿 KnowledgeMaster — local-first research paper knowledge workbench"
+authors = ["hkcao"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "knowledge_master_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-store = "2"
+tauri-plugin-stronghold = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+hex = "0.4"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+reqwest = { version = "0.12", features = ["json", "stream"] }
+tokio = { version = "1", features = ["full"] }
+tempfile = "3"
+walkdir = "2"
+lopdf = "0.34"
+scraper = "0.20"
+base64 = "0.22"
+thiserror = "1"
+log = "0.4"
+env_logger = "0.11"
+dirs = "5"
+pdf-extract = "0.7"
+docx-rs = "0.4"
+regex-lite = "0.1"
+url = "2"
+lazy_static = "1"
+which = "7"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

@@ -1,0 +1,10 @@
+/Users/hank/Desktop/知识整理器/src-tauri/target/debug/deps/tauri_plugin_dialog-17144ddc544d7a8a.d: /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.7.2/src/lib.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.7.2/src/desktop.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.7.2/src/commands.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.7.2/src/error.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.7.2/src/models.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.7.2/src/init-iife.js
+
+/Users/hank/Desktop/知识整理器/src-tauri/target/debug/deps/libtauri_plugin_dialog-17144ddc544d7a8a.rmeta: /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.7.2/src/lib.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.7.2/src/desktop.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.7.2/src/commands.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.7.2/src/error.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.7.2/src/models.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.7.2/src/init-iife.js
+
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.7.2/src/lib.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.7.2/src/desktop.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.7.2/src/commands.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.7.2/src/error.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.7.2/src/models.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tauri-plugin-dialog-2.7.2/src/init-iife.js:

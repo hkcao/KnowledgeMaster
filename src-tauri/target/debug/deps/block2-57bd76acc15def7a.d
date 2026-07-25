@@ -1,0 +1,14 @@
+/Users/hank/Desktop/知识整理器/src-tauri/target/debug/deps/block2-57bd76acc15def7a.d: /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/block2-0.6.2/src/lib.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/block2-0.6.2/src/abi.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/block2-0.6.2/src/block.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/block2-0.6.2/src/debug.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/block2-0.6.2/src/encoding.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/block2-0.6.2/src/ffi.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/block2-0.6.2/src/global.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/block2-0.6.2/src/rc_block.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/block2-0.6.2/src/stack.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/block2-0.6.2/src/traits.rs
+
+/Users/hank/Desktop/知识整理器/src-tauri/target/debug/deps/libblock2-57bd76acc15def7a.rmeta: /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/block2-0.6.2/src/lib.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/block2-0.6.2/src/abi.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/block2-0.6.2/src/block.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/block2-0.6.2/src/debug.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/block2-0.6.2/src/encoding.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/block2-0.6.2/src/ffi.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/block2-0.6.2/src/global.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/block2-0.6.2/src/rc_block.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/block2-0.6.2/src/stack.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/block2-0.6.2/src/traits.rs
+
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/block2-0.6.2/src/lib.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/block2-0.6.2/src/abi.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/block2-0.6.2/src/block.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/block2-0.6.2/src/debug.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/block2-0.6.2/src/encoding.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/block2-0.6.2/src/ffi.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/block2-0.6.2/src/global.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/block2-0.6.2/src/rc_block.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/block2-0.6.2/src/stack.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/block2-0.6.2/src/traits.rs:

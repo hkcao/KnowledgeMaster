@@ -1,0 +1,11 @@
+/Users/hank/Desktop/知识整理器/src-tauri/target/debug/deps/url-237d8d8061633953.d: /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/url-2.5.8/src/lib.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/url-2.5.8/src/host.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/url-2.5.8/src/origin.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/url-2.5.8/src/parser.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/url-2.5.8/src/path_segments.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/url-2.5.8/src/slicing.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/url-2.5.8/src/quirks.rs
+
+/Users/hank/Desktop/知识整理器/src-tauri/target/debug/deps/liburl-237d8d8061633953.rmeta: /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/url-2.5.8/src/lib.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/url-2.5.8/src/host.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/url-2.5.8/src/origin.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/url-2.5.8/src/parser.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/url-2.5.8/src/path_segments.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/url-2.5.8/src/slicing.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/url-2.5.8/src/quirks.rs
+
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/url-2.5.8/src/lib.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/url-2.5.8/src/host.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/url-2.5.8/src/origin.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/url-2.5.8/src/parser.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/url-2.5.8/src/path_segments.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/url-2.5.8/src/slicing.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/url-2.5.8/src/quirks.rs:

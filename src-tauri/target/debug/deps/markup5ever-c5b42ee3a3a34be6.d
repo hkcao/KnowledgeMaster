@@ -1,0 +1,15 @@
+/Users/hank/Desktop/知识整理器/src-tauri/target/debug/deps/markup5ever-c5b42ee3a3a34be6.d: /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/markup5ever-0.12.1/lib.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/markup5ever-0.12.1/data/mod.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/markup5ever-0.12.1/interface/mod.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/markup5ever-0.12.1/interface/tree_builder.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/markup5ever-0.12.1/serialize.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/markup5ever-0.12.1/util/buffer_queue.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/markup5ever-0.12.1/util/smallcharset.rs /Users/hank/Desktop/知识整理器/src-tauri/target/debug/build/markup5ever-819c0ba5ead4f832/out/generated.rs /Users/hank/Desktop/知识整理器/src-tauri/target/debug/build/markup5ever-819c0ba5ead4f832/out/named_entities.rs
+
+/Users/hank/Desktop/知识整理器/src-tauri/target/debug/deps/libmarkup5ever-c5b42ee3a3a34be6.rmeta: /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/markup5ever-0.12.1/lib.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/markup5ever-0.12.1/data/mod.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/markup5ever-0.12.1/interface/mod.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/markup5ever-0.12.1/interface/tree_builder.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/markup5ever-0.12.1/serialize.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/markup5ever-0.12.1/util/buffer_queue.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/markup5ever-0.12.1/util/smallcharset.rs /Users/hank/Desktop/知识整理器/src-tauri/target/debug/build/markup5ever-819c0ba5ead4f832/out/generated.rs /Users/hank/Desktop/知识整理器/src-tauri/target/debug/build/markup5ever-819c0ba5ead4f832/out/named_entities.rs
+
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/markup5ever-0.12.1/lib.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/markup5ever-0.12.1/data/mod.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/markup5ever-0.12.1/interface/mod.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/markup5ever-0.12.1/interface/tree_builder.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/markup5ever-0.12.1/serialize.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/markup5ever-0.12.1/util/buffer_queue.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/markup5ever-0.12.1/util/smallcharset.rs:
+/Users/hank/Desktop/知识整理器/src-tauri/target/debug/build/markup5ever-819c0ba5ead4f832/out/generated.rs:
+/Users/hank/Desktop/知识整理器/src-tauri/target/debug/build/markup5ever-819c0ba5ead4f832/out/named_entities.rs:
+
+# env-dep:OUT_DIR=/Users/hank/Desktop/知识整理器/src-tauri/target/debug/build/markup5ever-819c0ba5ead4f832/out

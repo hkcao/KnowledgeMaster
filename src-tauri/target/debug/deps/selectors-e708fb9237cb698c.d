@@ -1,0 +1,18 @@
+/Users/hank/Desktop/知识整理器/src-tauri/target/debug/deps/selectors-e708fb9237cb698c.d: /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.25.0/lib.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.25.0/attr.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.25.0/bloom.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.25.0/builder.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.25.0/context.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.25.0/matching.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.25.0/nth_index_cache.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.25.0/parser.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.25.0/sink.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.25.0/tree.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.25.0/visitor.rs /Users/hank/Desktop/知识整理器/src-tauri/target/debug/build/selectors-c05167ceb009b255/out/ascii_case_insensitive_html_attributes.rs
+
+/Users/hank/Desktop/知识整理器/src-tauri/target/debug/deps/libselectors-e708fb9237cb698c.rmeta: /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.25.0/lib.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.25.0/attr.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.25.0/bloom.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.25.0/builder.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.25.0/context.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.25.0/matching.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.25.0/nth_index_cache.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.25.0/parser.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.25.0/sink.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.25.0/tree.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.25.0/visitor.rs /Users/hank/Desktop/知识整理器/src-tauri/target/debug/build/selectors-c05167ceb009b255/out/ascii_case_insensitive_html_attributes.rs
+
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.25.0/lib.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.25.0/attr.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.25.0/bloom.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.25.0/builder.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.25.0/context.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.25.0/matching.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.25.0/nth_index_cache.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.25.0/parser.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.25.0/sink.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.25.0/tree.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/selectors-0.25.0/visitor.rs:
+/Users/hank/Desktop/知识整理器/src-tauri/target/debug/build/selectors-c05167ceb009b255/out/ascii_case_insensitive_html_attributes.rs:
+
+# env-dep:OUT_DIR=/Users/hank/Desktop/知识整理器/src-tauri/target/debug/build/selectors-c05167ceb009b255/out

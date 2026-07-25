@@ -1,0 +1,9 @@
+/Users/hank/Desktop/知识整理器/src-tauri/target/debug/deps/system_configuration-7822fda3713caa9e.d: /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/system-configuration-0.7.0/src/lib.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/system-configuration-0.7.0/src/dynamic_store.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/system-configuration-0.7.0/src/network_configuration.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/system-configuration-0.7.0/src/network_reachability.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/system-configuration-0.7.0/src/preferences.rs
+
+/Users/hank/Desktop/知识整理器/src-tauri/target/debug/deps/libsystem_configuration-7822fda3713caa9e.rmeta: /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/system-configuration-0.7.0/src/lib.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/system-configuration-0.7.0/src/dynamic_store.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/system-configuration-0.7.0/src/network_configuration.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/system-configuration-0.7.0/src/network_reachability.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/system-configuration-0.7.0/src/preferences.rs
+
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/system-configuration-0.7.0/src/lib.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/system-configuration-0.7.0/src/dynamic_store.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/system-configuration-0.7.0/src/network_configuration.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/system-configuration-0.7.0/src/network_reachability.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/system-configuration-0.7.0/src/preferences.rs:

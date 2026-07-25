@@ -1,0 +1,6 @@
+/Users/hank/Desktop/知识整理器/src-tauri/target/debug/deps/adler2-f07472d6c822cb97.d: /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/adler2-2.0.1/src/lib.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/adler2-2.0.1/src/algo.rs
+
+/Users/hank/Desktop/知识整理器/src-tauri/target/debug/deps/libadler2-f07472d6c822cb97.rmeta: /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/adler2-2.0.1/src/lib.rs /Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/adler2-2.0.1/src/algo.rs
+
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/adler2-2.0.1/src/lib.rs:
+/Users/hank/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/adler2-2.0.1/src/algo.rs:
