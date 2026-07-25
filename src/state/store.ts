@@ -40,6 +40,7 @@ interface KnowledgeStore {
   settings: AppSettings;
   libraryVisible: boolean;
   chatPlacement: ChatPlacement;
+  showSettings: boolean;
 
   // Actions
   setData: (data: KnowledgeData) => void;
@@ -127,6 +128,7 @@ export const useStore = create<KnowledgeStore>((set, get) => ({
   },
   libraryVisible: true,
   chatPlacement: "right",
+  showSettings: false,
 
   setData: (data) => set({ data, loading: false }),
 
