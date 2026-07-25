@@ -37,11 +37,6 @@
     "targets": ["app", "dmg"]
   },
   "plugins": {
-    "dialog": {},
-    "store": {},
-    "stronghold": {
-      "timeout": 60000
-    },
     "shell": {
       "open": true
     }
