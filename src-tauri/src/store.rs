@@ -12,11 +12,41 @@ pub struct KnowledgeStore {
 }
 
 impl KnowledgeStore {
+    fn config_path() -> Option<PathBuf> {
+        let dir = dirs::config_dir()?.join("knowledge-master");
+        Some(dir.join("config.json"))
+    }
+
+    fn saved_library_root() -> Option<PathBuf> {
+        let path = Self::config_path()?;
+        if path.exists() {
+            let content = std::fs::read_to_string(&path).ok()?;
+            let config: serde_json::Value = serde_json::from_str(&content).ok()?;
+            config.get("library_root")
+                .and_then(|v| v.as_str())
+                .map(PathBuf::from)
+        } else {
+            None
+        }
+    }
+
+    fn save_library_root(path: &Path) {
+        if let Some(config_path) = Self::config_path() {
+            if let Some(parent) = config_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let config = serde_json::json!({"library_root": path.to_string_lossy()});
+            let _ = std::fs::write(&config_path, serde_json::to_string(&config).unwrap_or_default());
+        }
+    }
+
     pub fn new(root_path: Option<PathBuf>) -> AppResult<Self> {
-        let default_root = dirs_next().unwrap_or_else(|| PathBuf::from("."))
+        let default_root = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."))
             .join("KnowledgeMaster")
             .join("library");
-        let root_path = root_path.unwrap_or(default_root);
+        let root_path = root_path
+            .or_else(Self::saved_library_root)
+            .unwrap_or(default_root);
         let mut store = Self {
             data: KnowledgeData::new(),
             root_path,
@@ -80,6 +110,7 @@ impl KnowledgeStore {
     }
 
     pub fn switch_root(&mut self, new_root: PathBuf, migrate: bool) -> AppResult<()> {
+        Self::save_library_root(&new_root);
         if migrate && new_root != self.root_path {
             fs::create_dir_all(&new_root)?;
             for name in &["knowledge.json", "knowledge.json.bak", "source"] {

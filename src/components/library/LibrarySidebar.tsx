@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useStore } from "../../state/store";
 import type { KnowledgeDocument, Topic } from "../../types/models";
 
@@ -22,9 +22,24 @@ export function LibrarySidebar({ currentDocument, onOpen }: Props) {
   const [renamingTopic, setRenamingTopic] = useState<Topic | null>(null);
   const [renameName, setRenameName] = useState("");
   const [importMsg, setImportMsg] = useState("");
+  const [libraryPath, setLibraryPath] = useState("");
+
+  useEffect(() => {
+    const loadPath = async () => {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        const path = await invoke<string>("get_library_root");
+        setLibraryPath(path);
+      } catch {}
+    };
+    loadPath();
+  }, []);
 
   const topics = data?.topics || [];
   const documents = data?.documents || [];
+  const allTopicIds = data?.document_topics?.map((dt) => dt.document_id) || [];
+
+  const isCloudPath = libraryPath.includes("CloudDocs") || libraryPath.includes("iCloud");
 
   const performSearch = async (q: string) => {
     setQuery(q);
@@ -57,48 +72,73 @@ export function LibrarySidebar({ currentDocument, onOpen }: Props) {
     }
   };
 
+  const handleChangeLibrary = async () => {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const dir = await open({ directory: true, multiple: false, title: "选择知识库目录" });
+      if (dir && typeof dir === "string") {
+        const migrate = documents.length === 0 || confirm("是否将现有资料迁移到新目录？");
+        const { invoke } = await import("@tauri-apps/api/core");
+        await invoke("switch_library_root", { newRoot: dir, migrate });
+        await useStore.getState().loadData();
+        setLibraryPath(dir);
+      }
+    } catch (e: any) {
+      setImportMsg(`切换失败：${e}`);
+    }
+  };
+
   const displayDocs = searchResults || documents;
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full text-sm">
+      {/* Header with title and settings */}
       <div className="flex items-center gap-2 px-3.5 py-3 border-b border-[var(--color-border)]">
-        <h1 className="text-base font-bold">知屿</h1>
+        <span className="text-lg">📚</span>
+        <h1 className="text-base font-bold flex-1">知屿</h1>
         <span className="text-xs text-secondary">{documents.length} 份</span>
-        <div className="flex-1" />
+        <button
+          onClick={() => useStore.setState({ showSettings: true })}
+          className="p-1.5 text-sm hover:bg-[var(--color-hover)] rounded-md transition-colors"
+          title="设置"
+        >
+          ⚙️
+        </button>
       </div>
 
       {/* Search */}
-      <div className="p-3">
+      <div className="px-3 pt-2 pb-1">
         <input
           type="text"
           placeholder="搜索文件名、正文或主题…"
-          className="w-full px-3 py-1.5 text-sm rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] outline-none focus:border-[var(--color-accent)]"
+          className="w-full px-3 py-1.5 text-xs rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] outline-none focus:border-[var(--color-accent)] transition-colors"
           value={query}
           onChange={(e) => performSearch(e.target.value)}
         />
       </div>
 
       {/* Actions */}
-      <div className="flex gap-2 px-3 pb-2">
-        <button onClick={handleImport} className="px-3 py-1.5 bg-[var(--color-accent)] text-white rounded-md text-sm font-medium hover:opacity-90">
-          导入文件
+      <div className="flex gap-1.5 px-3 py-2">
+        <button onClick={handleImport} className="flex-1 px-2.5 py-1.5 bg-[var(--color-accent)] text-white rounded-md text-xs font-medium hover:opacity-90 transition-opacity">
+          📥 导入文件
         </button>
         <button
           onClick={() => { setShowNewTopic(true); setNewTopicParentId(undefined); }}
-          className="px-3 py-1.5 border border-[var(--color-border)] rounded-md text-sm hover:bg-[var(--color-hover)]"
+          className="px-2 py-1.5 border border-[var(--color-border)] rounded-md text-xs hover:bg-[var(--color-hover)] transition-colors"
+          title="新建主题"
         >
-          新建主题
+          📁+
         </button>
       </div>
 
       {importMsg && (
-        <div className="px-3 pb-2 text-xs text-secondary">{importMsg}</div>
+        <div className="px-3 pb-1.5 text-[11px] text-secondary leading-tight">{importMsg}</div>
       )}
 
       {/* Topic tree */}
       <div className="flex-1 overflow-y-auto px-1">
-        <div className="px-3 py-1.5 text-xs font-semibold text-secondary uppercase tracking-wide">
-          知识目录
+        <div className="flex items-center px-3 py-1.5">
+          <span className="text-[11px] font-semibold text-secondary uppercase tracking-wide flex-1">知识目录</span>
         </div>
 
         {rootTopics.map((topic) => (
@@ -124,49 +164,61 @@ export function LibrarySidebar({ currentDocument, onOpen }: Props) {
         ))}
 
         {/* Unclassified docs */}
-        {documents.filter((d) => {
-          const linked = data?.document_topics?.map((dt) => dt.document_id) || [];
-          return !linked.includes(d.id);
-        }).length > 0 && (
-          <div className="mt-2">
-            <div className="px-3 py-1 text-xs text-secondary font-medium">未分类</div>
-            {documents
-              .filter((d) => {
-                const linked = data?.document_topics?.map((dt) => dt.document_id) || [];
-                return !linked.includes(d.id);
-              })
-              .map((doc) => (
+        {(() => {
+          const unclassified = documents.filter((d) => !allTopicIds.includes(d.id));
+          if (unclassified.length === 0) return null;
+          return (
+            <div className="mt-1">
+              <div className="px-3 py-1 text-[11px] text-secondary font-medium">未分类</div>
+              {unclassified.map((doc) => (
                 <button
                   key={doc.id}
                   onClick={() => onOpen(doc)}
-                  className={`w-full text-left px-3 py-1.5 text-sm rounded hover:bg-[var(--color-hover)] flex items-center gap-2 ${
+                  className={`w-full text-left px-3 py-1.5 text-sm rounded hover:bg-[var(--color-hover)] transition-colors flex items-center gap-2 ${
                     currentDocument?.id === doc.id ? "bg-[var(--color-accent-light)]" : ""
                   }`}
                 >
-                  <span className="text-xs opacity-50">
+                  <span className="text-xs opacity-50 shrink-0">
                     {doc.extension === ".pdf" ? "📄" : "📝"}
                   </span>
                   <span className="truncate">{doc.display_name?.trim() || doc.name}</span>
                 </button>
               ))}
-          </div>
-        )}
+            </div>
+          );
+        })()}
 
         {displayDocs.length === 0 && (
-          <div className="px-4 py-8 text-center text-sm text-secondary">
-            {query ? "没有匹配结果" : "还没有资料，点击导入"}
+          <div className="px-4 py-8 text-center text-xs text-secondary">
+            {query ? "没有匹配结果" : "还没有资料，点击导入按钮添加"}
           </div>
         )}
       </div>
 
+      {/* Footer - library path */}
+      <div className="border-t border-[var(--color-border)] px-3 py-2 bg-[var(--color-bg-secondary)]">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] text-secondary truncate flex-1 leading-tight">
+            {isCloudPath ? "☁️ iCloud" : "💾 本地"} · {libraryPath.split("/").slice(-3).join("/") || libraryPath}
+          </span>
+          <button
+            onClick={handleChangeLibrary}
+            className="text-[10px] px-1.5 py-0.5 text-[var(--color-accent)] hover:bg-[var(--color-hover)] rounded shrink-0 transition-colors"
+            title="更改知识库目录"
+          >
+            更改
+          </button>
+        </div>
+      </div>
+
       {/* New topic dialog */}
       {showNewTopic && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/20 z-50" onClick={() => setShowNewTopic(false)}>
+        <div className="fixed inset-0 flex items-center justify-center bg-black/20 z-50" onClick={() => setShowNewTopic(false)}>
           <div className="bg-[var(--color-bg)] rounded-lg shadow-xl p-6 w-[360px]" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-lg font-bold mb-4">{newTopicParentId ? "新建子主题" : "新建主题"}</h2>
+            <h2 className="text-base font-bold mb-4">{newTopicParentId ? "新建子主题" : "新建主题"}</h2>
             <input
               type="text"
-              className="w-full px-3 py-2 rounded-md border border-[var(--color-border)] mb-4"
+              className="w-full px-3 py-2 text-sm rounded-md border border-[var(--color-border)] mb-4 outline-none focus:border-[var(--color-accent)]"
               placeholder="主题名称"
               value={newTopicName}
               onChange={(e) => setNewTopicName(e.target.value)}
@@ -180,14 +232,14 @@ export function LibrarySidebar({ currentDocument, onOpen }: Props) {
               }}
             />
             <div className="flex justify-end gap-2">
-              <button onClick={() => setShowNewTopic(false)} className="px-4 py-2 text-sm">取消</button>
+              <button onClick={() => setShowNewTopic(false)} className="px-4 py-1.5 text-sm">取消</button>
               <button
                 onClick={() => {
                   createTopic(newTopicName, newTopicParentId);
                   setShowNewTopic(false);
                   setNewTopicName("");
                 }}
-                className="px-4 py-2 bg-[var(--color-accent)] text-white rounded-md text-sm"
+                className="px-4 py-1.5 bg-[var(--color-accent)] text-white rounded-md text-sm"
               >
                 创建
               </button>
@@ -198,12 +250,12 @@ export function LibrarySidebar({ currentDocument, onOpen }: Props) {
 
       {/* Rename topic dialog */}
       {renamingTopic && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/20 z-50" onClick={() => setRenamingTopic(null)}>
+        <div className="fixed inset-0 flex items-center justify-center bg-black/20 z-50" onClick={() => setRenamingTopic(null)}>
           <div className="bg-[var(--color-bg)] rounded-lg shadow-xl p-6 w-[360px]" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-lg font-bold mb-4">重命名主题</h2>
+            <h2 className="text-base font-bold mb-4">重命名主题</h2>
             <input
               type="text"
-              className="w-full px-3 py-2 rounded-md border border-[var(--color-border)] mb-4"
+              className="w-full px-3 py-2 text-sm rounded-md border border-[var(--color-border)] mb-4 outline-none focus:border-[var(--color-accent)]"
               value={renameName}
               onChange={(e) => setRenameName(e.target.value)}
               autoFocus
@@ -215,10 +267,10 @@ export function LibrarySidebar({ currentDocument, onOpen }: Props) {
               }}
             />
             <div className="flex justify-end gap-2">
-              <button onClick={() => setRenamingTopic(null)} className="px-4 py-2 text-sm">取消</button>
+              <button onClick={() => setRenamingTopic(null)} className="px-4 py-1.5 text-sm">取消</button>
               <button
                 onClick={() => { renameTopic(renamingTopic.id, renameName); setRenamingTopic(null); }}
-                className="px-4 py-2 bg-[var(--color-accent)] text-white rounded-md text-sm"
+                className="px-4 py-1.5 bg-[var(--color-accent)] text-white rounded-md text-sm"
               >
                 保存
               </button>
@@ -256,24 +308,26 @@ function TopicItem({
   return (
     <div>
       <div
-        className={`flex items-center gap-1 px-2 py-1 rounded cursor-pointer hover:bg-[var(--color-hover)] ${
+        className={`flex items-center gap-1 px-2 py-1 rounded cursor-pointer hover:bg-[var(--color-hover)] transition-colors group ${
           selectedTopicId === topic.id ? "bg-[var(--color-accent-light)]" : ""
         }`}
-        style={{ paddingLeft: `${8 + depth * 12}px` }}
+        style={{ paddingLeft: `${6 + depth * 12}px` }}
+        onClick={onSelect}
       >
         <button
-          onClick={() => setExpanded(!expanded)}
-          className="text-xs w-4 h-4 flex items-center justify-center opacity-50 hover:opacity-100"
+          onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
+          className="text-[10px] w-4 h-4 flex items-center justify-center opacity-40 hover:opacity-80 shrink-0"
         >
           {expanded ? "▼" : "▶"}
         </button>
-        <span onClick={onSelect} className="flex-1 text-sm truncate">
-          📁 {topic.name}
-        </span>
-        <span className="text-xs text-secondary">{linkedDocs.length}</span>
-        <button onClick={onNewChild} className="text-xs px-1 hover:opacity-70" title="新子主题">+</button>
-        <button onClick={onRename} className="text-xs px-1 hover:opacity-70" title="重命名">✎</button>
-        <button onClick={onDelete} className="text-xs px-1 hover:opacity-70 text-red-500" title="删除">×</button>
+        <span className="text-xs mr-1 shrink-0">📁</span>
+        <span className="flex-1 text-sm truncate">{topic.name}</span>
+        <span className="text-[10px] text-secondary mr-1">{linkedDocs.length}</span>
+        <div className="hidden group-hover:flex items-center gap-0.5">
+          <button onClick={(e) => { e.stopPropagation(); onNewChild(); }} className="text-[10px] px-0.5 hover:opacity-70" title="新建子主题">+</button>
+          <button onClick={(e) => { e.stopPropagation(); onRename(); }} className="text-[10px] px-0.5 hover:opacity-70" title="重命名">✎</button>
+          <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="text-[10px] px-0.5 hover:opacity-70 text-red-500" title="删除">×</button>
+        </div>
       </div>
 
       {expanded && (
@@ -299,18 +353,18 @@ function TopicItem({
           {linkedDocs.map((doc) => (
             <div
               key={doc.id}
-              className={`flex items-center gap-2 pl-3 py-1 rounded cursor-pointer hover:bg-[var(--color-hover)] text-sm ${
+              className={`flex items-center gap-2 rounded cursor-pointer hover:bg-[var(--color-hover)] transition-colors group text-sm ${
                 currentDocument?.id === doc.id ? "bg-[var(--color-accent-light)]" : ""
               }`}
-              style={{ paddingLeft: `${24 + depth * 12}px` }}
+              style={{ paddingLeft: `${22 + depth * 12}px` }}
             >
-              <span className="text-xs opacity-50">{doc.extension === ".pdf" ? "📄" : "📝"}</span>
-              <span className="flex-1 truncate" onClick={() => onOpen(doc)}>
+              <span className="text-xs opacity-50 shrink-0">{doc.extension === ".pdf" ? "📄" : "📝"}</span>
+              <span className="flex-1 truncate py-1.5" onClick={() => onOpen(doc)}>
                 {doc.display_name?.trim() || doc.name}
               </span>
               <button
                 onClick={() => onDeleteDoc(doc.id)}
-                className="text-xs opacity-0 hover:opacity-70 text-red-500"
+                className="hidden group-hover:block text-[10px] text-red-500 hover:opacity-70 mr-1 shrink-0"
               >
                 ×
               </button>

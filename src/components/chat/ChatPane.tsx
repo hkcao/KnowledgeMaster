@@ -52,13 +52,6 @@ export function ChatPane() {
         >
           ＋
         </button>
-        <button
-          onClick={() => useStore.setState({ showSettings: true })}
-          className="text-xs px-2 py-1 hover:bg-[var(--color-hover)] rounded transition-colors"
-          title="设置"
-        >
-          ⚙
-        </button>
       </div>
 
       {/* Scope selector */}
