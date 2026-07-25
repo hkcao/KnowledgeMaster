@@ -43,15 +43,18 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
       if (!dir || typeof dir !== "string") return;
 
       const currentDocs = data?.documents?.length || 0;
-      const migrate = currentDocs === 0 || confirm(
-        "是否将现有资料迁移到新目录？\n\n" +
-        "确定 — 复制现有资料到新目录\n" +
-        "取消 — 仅切换目录（不迁移资料）"
-      );
+      let migrate = currentDocs === 0;
+      if (!migrate) {
+        migrate = window.confirm(
+          "是否将现有资料迁移到新目录？\n\n" +
+          "确定 — 复制现有资料到新目录\n" +
+          "取消 — 仅切换目录（不迁移资料）"
+        );
+      }
 
       const { invoke } = await import("@tauri-apps/api/core");
       setSwitchMsg("正在切换…");
-      await invoke("switch_library_root", { newRoot: dir, migrate });
+      await invoke("switch_library_root", { newRoot: dir, migrate: !!migrate });
 
       // Reset global state
       useStore.setState({
