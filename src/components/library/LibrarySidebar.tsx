@@ -76,15 +76,36 @@ export function LibrarySidebar({ currentDocument, onOpen }: Props) {
     try {
       const { open } = await import("@tauri-apps/plugin-dialog");
       const dir = await open({ directory: true, multiple: false, title: "选择知识库目录" });
-      if (dir && typeof dir === "string") {
-        const migrate = documents.length === 0 || confirm("是否将现有资料迁移到新目录？");
-        const { invoke } = await import("@tauri-apps/api/core");
-        await invoke("switch_library_root", { newRoot: dir, migrate });
-        await useStore.getState().loadData();
-        setLibraryPath(dir);
-      }
+      if (!dir || typeof dir !== "string") return;
+
+      const currentDocs = useStore.getState().data?.documents?.length || 0;
+      const migrate = currentDocs === 0 || confirm("是否将现有资料迁移到新目录？\n\n选择「确定」复制现有资料到新目录\n选择「取消」打开新目录（不迁移资料）");
+
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("switch_library_root", { newRoot: dir, migrate });
+
+      // Reset ALL local state
+      setQuery("");
+      setSearchResults(null);
+      setImportMsg("");
+
+      // Reset global reader state
+      useStore.setState({
+        selectedTopicId: null,
+        currentDocument: null,
+        tabs: [],
+      });
+
+      // Reload data from new library
+      await useStore.getState().loadData();
+
+      // Refresh library path display
+      const newPath = await invoke<string>("get_library_root");
+      setLibraryPath(newPath);
+      setImportMsg(`已切换至：${newPath}`);
     } catch (e: any) {
       setImportMsg(`切换失败：${e}`);
+      console.error("Library switch error:", e);
     }
   };
 

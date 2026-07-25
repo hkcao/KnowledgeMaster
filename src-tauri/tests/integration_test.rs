@@ -350,6 +350,40 @@ fn test_delete_document_cleanup() {
 }
 
 #[test]
+#[test]
+fn test_switch_library_root_with_migration() {
+    let mut store = test_store();
+
+    // Create some data
+    let input = store.root_path.join("note.txt");
+    std::fs::write(&input, "test data").unwrap();
+    store.import_files(&[input]).unwrap();
+    store.create_topic("TestTopic", None).unwrap();
+    assert_eq!(store.data.documents.len(), 1);
+    assert_eq!(store.data.topics.len(), 1);
+
+    // Switch to new directory with migration
+    let new_root = std::env::temp_dir().join(format!("km-test-new-{}", uuid::Uuid::new_v4()));
+    store.switch_root(new_root.clone(), true).unwrap();
+
+    // Data should be migrated and reloaded
+    assert_eq!(store.data.documents.len(), 1);
+    assert_eq!(store.data.topics.len(), 1);
+    assert_eq!(store.root_path, new_root);
+    assert!(new_root.join("knowledge.json").exists());
+
+    // Switch to empty directory without migration
+    let empty_root = std::env::temp_dir().join(format!("km-test-empty-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&empty_root).unwrap();
+    store.switch_root(empty_root.clone(), false).unwrap();
+
+    // Should be empty
+    assert!(store.data.documents.is_empty());
+    assert!(store.data.topics.is_empty());
+    assert!(empty_root.join("knowledge.json").exists());
+}
+
+#[test]
 fn test_chunking_and_scoring() {
     let text = String::from_utf8(vec![b'A'; 3200]).unwrap();
     let chunks = knowledge_master_lib::store::chunks(&text, 1000, 100);
