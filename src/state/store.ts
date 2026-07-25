@@ -134,11 +134,13 @@ export const useStore = create<KnowledgeStore>((set, get) => ({
 
   loadData: async () => {
     try {
-      set({ loading: true });
+      set({ loading: true, error: null });
       const { invoke } = await import("@tauri-apps/api/core");
       const data = await invoke<KnowledgeData>("load_full_state");
+      console.log("[loadData] loaded", data.documents?.length, "docs,", data.topics?.length, "topics");
       set({ data, loading: false });
     } catch (e: any) {
+      console.error("[loadData] failed:", e);
       set({ error: e.toString(), loading: false });
     }
   },

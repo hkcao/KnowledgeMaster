@@ -30,7 +30,7 @@ impl KnowledgeStore {
         }
     }
 
-    fn save_library_root(path: &Path) {
+    pub fn save_library_root(path: &Path) {
         if let Some(config_path) = Self::config_path() {
             if let Some(parent) = config_path.parent() {
                 let _ = std::fs::create_dir_all(parent);
@@ -110,7 +110,6 @@ impl KnowledgeStore {
     }
 
     pub fn switch_root(&mut self, new_root: PathBuf, migrate: bool) -> AppResult<()> {
-        Self::save_library_root(&new_root);
         if migrate && new_root != self.root_path {
             fs::create_dir_all(&new_root)?;
             for name in &["knowledge.json", "knowledge.json.bak", "source"] {

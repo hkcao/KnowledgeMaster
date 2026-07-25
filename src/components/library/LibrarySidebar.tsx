@@ -216,19 +216,15 @@ export function LibrarySidebar({ currentDocument, onOpen }: Props) {
         )}
       </div>
 
-      {/* Footer - library path */}
+      {/* Footer - library path (info only) */}
       <div className="border-t border-[var(--color-border)] px-3 py-2 bg-[var(--color-bg-secondary)]">
         <div className="flex items-center gap-1.5">
-          <span className="text-[10px] text-secondary truncate flex-1 leading-tight">
+          <span className="text-[10px] text-secondary truncate leading-tight">
             {isCloudPath ? "☁️ iCloud" : "💾 本地"} · {libraryPath.split("/").slice(-3).join("/") || libraryPath}
           </span>
-          <button
-            onClick={handleChangeLibrary}
-            className="text-[10px] px-1.5 py-0.5 text-[var(--color-accent)] hover:bg-[var(--color-hover)] rounded shrink-0 transition-colors"
-            title="更改知识库目录"
-          >
-            更改
-          </button>
+        </div>
+        <div className="text-[10px] text-secondary mt-0.5">
+          {documents.length} 份资料 · {topics.length} 个主题
         </div>
       </div>
 

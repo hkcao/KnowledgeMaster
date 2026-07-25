@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useStore } from "../../state/store";
 
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
@@ -6,6 +6,19 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [apiKey, setApiKey] = useState("");
   const [testResult, setTestResult] = useState("");
   const [testing, setTesting] = useState(false);
+  const [libraryPath, setLibraryPath] = useState("");
+  const [switchMsg, setSwitchMsg] = useState("");
+
+  useEffect(() => {
+    const loadPath = async () => {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        const path = await invoke<string>("get_library_root");
+        setLibraryPath(path);
+      } catch {}
+    };
+    loadPath();
+  }, []);
 
   const handleTestConnection = async () => {
     setTesting(true);
@@ -23,38 +36,125 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     setTesting(false);
   };
 
+  const handleChangeLibrary = async () => {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const dir = await open({ directory: true, multiple: false, title: "选择知识库目录" });
+      if (!dir || typeof dir !== "string") return;
+
+      const currentDocs = data?.documents?.length || 0;
+      const migrate = currentDocs === 0 || confirm(
+        "是否将现有资料迁移到新目录？\n\n" +
+        "确定 — 复制现有资料到新目录\n" +
+        "取消 — 仅切换目录（不迁移资料）"
+      );
+
+      const { invoke } = await import("@tauri-apps/api/core");
+      setSwitchMsg("正在切换…");
+      await invoke("switch_library_root", { newRoot: dir, migrate });
+
+      // Reset global state
+      useStore.setState({
+        selectedTopicId: null,
+        currentDocument: null,
+        tabs: [],
+      });
+
+      // Reload data
+      await useStore.getState().loadData();
+
+      // Refresh display
+      const newPath = await invoke<string>("get_library_root");
+      setLibraryPath(newPath);
+      setSwitchMsg(`已切换至：${newPath}`);
+      setTimeout(() => setSwitchMsg(""), 3000);
+    } catch (e: any) {
+      setSwitchMsg(`切换失败：${e}`);
+    }
+  };
+
+  const handleRevealInFinder = async () => {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const path = await invoke<string>("get_library_root");
+      const { open } = await import("@tauri-apps/plugin-shell");
+      await open(path);
+    } catch {}
+  };
+
+  const isCloudPath = libraryPath.includes("CloudDocs") || libraryPath.includes("iCloud");
+
   return (
     <div className="fixed inset-0 flex items-center justify-center bg-black/30 z-50" onClick={onClose}>
       <div className="bg-[var(--color-bg)] rounded-xl shadow-2xl w-[660px] max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="sticky top-0 bg-[var(--color-bg)] border-b border-[var(--color-border)] px-6 py-4 flex items-center">
+        <div className="sticky top-0 bg-[var(--color-bg)] border-b border-[var(--color-border)] px-6 py-4 flex items-center z-10">
           <h2 className="text-lg font-bold">设置</h2>
           <div className="flex-1" />
-          <button onClick={onClose} className="text-sm px-3 py-1.5 bg-[var(--color-accent)] text-white rounded-md">
+          <button onClick={onClose} className="text-sm px-4 py-1.5 bg-[var(--color-accent)] text-white rounded-md font-medium">
             完成
           </button>
         </div>
 
-        <div className="p-6 space-y-6">
+        <div className="p-6 space-y-8">
+          {/* Library */}
+          <section>
+            <h3 className="text-sm font-semibold mb-3 text-secondary uppercase tracking-wide">知识库目录</h3>
+            <div className="p-3 bg-[var(--color-bg-secondary)] rounded-lg border border-[var(--color-border)]">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-xs font-medium">
+                  {isCloudPath ? "☁️ iCloud Drive" : "💾 本地存储"}
+                </span>
+                <span className="text-[10px] text-secondary">
+                  {data ? `${data.documents.length} 份资料 · ${data.topics.length} 个主题` : ""}
+                </span>
+              </div>
+              <div className="text-xs text-secondary font-mono break-all mb-3 bg-[var(--color-bg)] px-2 py-1.5 rounded border border-[var(--color-border)]">
+                {libraryPath || "加载中…"}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleChangeLibrary}
+                  className="px-3 py-1.5 text-sm bg-[var(--color-accent)] text-white rounded-md font-medium hover:opacity-90 transition-opacity"
+                >
+                  更改目录…
+                </button>
+                <button
+                  onClick={handleRevealInFinder}
+                  className="px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-md hover:bg-[var(--color-hover)] transition-colors"
+                >
+                  在 Finder 中显示
+                </button>
+              </div>
+              {switchMsg && (
+                <p className={`text-xs mt-2 ${switchMsg.includes("失败") ? "text-red-500" : "text-green-600"}`}>
+                  {switchMsg}
+                </p>
+              )}
+              <p className="text-[10px] text-secondary mt-2 leading-relaxed">
+                知识库目录保存资料、主题、批注和对话。可设置为 iCloud Drive 目录以在多台 Mac 间同步。
+                切换目录不会删除原有资料。
+              </p>
+            </div>
+          </section>
+
           {/* Chat backend */}
           <section>
             <h3 className="text-sm font-semibold mb-3 text-secondary uppercase tracking-wide">聊天后端</h3>
-            <div className="space-y-3">
-              <div className="flex items-center gap-3">
-                <label className="text-sm w-24 shrink-0">回答方式</label>
-                <select
-                  value={settings.chat_backend}
-                  onChange={(e) => useStore.setState({ settings: { ...settings, chat_backend: e.target.value } })}
-                  className="flex-1 text-sm px-3 py-1.5 border border-[var(--color-border)] rounded-md bg-[var(--color-bg)]"
-                >
-                  <option value="direct">直接 API</option>
-                  <option value="claude_code">Claude Code</option>
-                  <option value="codex">Codex</option>
-                </select>
-              </div>
-              <p className="text-xs text-secondary ml-[108px]">
-                Agent 模式需要先在终端安装并登录对应的 CLI
-              </p>
+            <div className="flex items-center gap-3">
+              <label className="text-sm w-24 shrink-0">回答方式</label>
+              <select
+                value={settings.chat_backend}
+                onChange={(e) => useStore.setState({ settings: { ...settings, chat_backend: e.target.value } })}
+                className="flex-1 text-sm px-3 py-1.5 border border-[var(--color-border)] rounded-md bg-[var(--color-bg)]"
+              >
+                <option value="direct">直接 API</option>
+                <option value="claude_code">Claude Code</option>
+                <option value="codex">Codex</option>
+              </select>
             </div>
+            <p className="text-xs text-secondary mt-1.5 ml-[108px]">
+              Claude Code / Codex 需要先在终端安装并登录
+            </p>
           </section>
 
           {/* API Settings */}
@@ -115,7 +215,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                   <button
                     onClick={handleTestConnection}
                     disabled={testing}
-                    className="px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-md hover:bg-[var(--color-hover)] disabled:opacity-50"
+                    className="px-3 py-1.5 text-sm border border-[var(--color-border)] rounded-md hover:bg-[var(--color-hover)] disabled:opacity-50 transition-colors"
                   >
                     {testing ? "测试中…" : "测试连接"}
                   </button>
@@ -157,14 +257,6 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                 <option value="hidden">隐藏</option>
               </select>
             </div>
-          </section>
-
-          {/* Library */}
-          <section>
-            <h3 className="text-sm font-semibold mb-3 text-secondary uppercase tracking-wide">知识库</h3>
-            <p className="text-xs text-secondary font-mono break-all">
-              {data ? `${data.documents.length} 份资料` : "加载中…"}
-            </p>
           </section>
         </div>
       </div>

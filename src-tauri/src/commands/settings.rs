@@ -18,7 +18,9 @@ pub async fn save_settings(_settings: AppSettings, _state: State<'_, AppState>) 
 #[tauri::command]
 pub async fn switch_library_root(new_root: String, migrate: bool, state: State<'_, AppState>) -> Result<(), String> {
     let mut guard = state.0.lock().map_err(|e| e.to_string())?;
-    guard.switch_root(std::path::PathBuf::from(&new_root), migrate).map_err(|e| e.to_string())
+    guard.switch_root(std::path::PathBuf::from(&new_root), migrate).map_err(|e| e.to_string())?;
+    KnowledgeStore::save_library_root(&std::path::PathBuf::from(&new_root));
+    Ok(())
 }
 
 #[tauri::command]
