@@ -184,6 +184,7 @@ export interface AppSettings {
   library_visible: boolean;
   api_context_mode: string;
   vision_enabled: boolean;
+  api_key?: string;
 }
 
 export type ChatPlacement = "right" | "bottom" | "sidebar" | "hidden";

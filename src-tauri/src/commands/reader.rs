@@ -32,13 +32,14 @@ pub async fn get_document_outline(document_id: Uuid, state: State<'_, AppState>)
 }
 
 #[tauri::command]
-pub async fn read_document_bytes(document_id: Uuid, state: State<'_, AppState>) -> Result<Vec<u8>, String> {
-    read_store(&state, |s| {
+pub async fn read_document_bytes(document_id: Uuid, state: State<'_, AppState>) -> Result<tauri::ipc::Response, String> {
+    let bytes = read_store(&state, |s| {
         let doc = s.data.documents.iter().find(|d| d.id == document_id)
             .cloned().ok_or("Document not found".to_string())?;
         let path = s.stored_path_for(&doc);
         std::fs::read(&path).map_err(|e| e.to_string())
-    })
+    })?;
+    Ok(tauri::ipc::Response::new(bytes))
 }
 
 #[tauri::command]

@@ -352,6 +352,8 @@ pub struct AppSettings {
     pub api_context_mode: String,
     #[serde(default)]
     pub vision_enabled: bool,
+    #[serde(default, skip_serializing)]
+    pub api_key: String,
 }
 
 fn default_provider() -> String { "deepseek".into() }
@@ -372,6 +374,7 @@ impl Default for AppSettings {
             library_visible: true,
             api_context_mode: "relevant_fragments".into(),
             vision_enabled: false,
+            api_key: String::new(),
         }
     }
 }

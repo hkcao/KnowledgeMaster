@@ -350,7 +350,6 @@ fn test_delete_document_cleanup() {
 }
 
 #[test]
-#[test]
 fn test_switch_library_root_with_migration() {
     let mut store = test_store();
 
@@ -391,4 +390,25 @@ fn test_chunking_and_scoring() {
 
     let score = knowledge_master_lib::store::score("数据库", "数据库性能分析", "设计");
     assert!(score > 0, "Score should be positive for matching text");
+}
+
+#[test]
+fn test_outline_and_bytes_real_pdf() {
+    let root = dirs::home_dir().unwrap()
+        .join("Library/Application Support/KnowledgeMaster/library");
+    if !root.join("knowledge.json").exists() {
+        eprintln!("skipping: no real library");
+        return;
+    }
+    let store = knowledge_master_lib::store::KnowledgeStore::new(Some(root)).unwrap();
+    let doc_id = uuid::Uuid::parse_str("D81397D9-76C3-4FFB-9140-46F1DFEABA29").unwrap();
+    let doc = store.data.documents.iter().find(|d| d.id == doc_id).cloned().unwrap();
+    let extracted = store.extracted_content_for(doc_id).unwrap();
+    assert!(!extracted.text.is_empty(), "extracted text should not be empty");
+    let source = store.stored_path_for(&doc);
+    assert!(source.exists(), "source pdf should exist at {:?}", source);
+    let outline = knowledge_master_lib::outline::build_outline(&doc, &source, &extracted);
+    println!("outline entries: {}", outline.len());
+    let bytes = std::fs::read(&source).unwrap();
+    assert_eq!(bytes.len() as i64, doc.size);
 }

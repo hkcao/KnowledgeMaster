@@ -23,6 +23,7 @@ pub async fn send_chat_message(
     base_url: String,
     api_context_mode: String,
     vision_enabled: bool,
+    api_key: String,
     state: State<'_, AppState>,
 ) -> Result<ChatMessage, String> {
     let settings = AppSettings {
@@ -34,6 +35,7 @@ pub async fn send_chat_message(
         library_visible: true,
         api_context_mode: api_context_mode.clone(),
         vision_enabled,
+        api_key,
     };
 
     // Phase 1: Extract all needed data from store (synchronous)
@@ -98,22 +100,17 @@ pub async fn send_chat_message(
 
     // Phase 2: Do async work without holding the lock
     let has_local_scope = !document_ids.is_empty() || !topic_ids.is_empty() || quote.is_some();
-    let answer = if backend == "direct" {
-        let messages = if api_context_mode == "autonomous" && has_local_scope {
+    let (answer, mut generated_files) = if backend == "direct" {
+        let result = if api_context_mode == "autonomous" && has_local_scope {
             let mut workspace = file_tools::KnowledgeFileTools::new(agent_docs, generated_dir)
                 .map_err(|e| e.to_string())?;
-            let manifest = workspace.manifest();
-            let notes_str = annotations.iter().enumerate()
-                .map(|(i, a)| format!("{}. {}", i + 1, a.quote))
-                .collect::<Vec<_>>().join("\n");
-            let prompt = format!("本轮授权的虚拟文件：\n{}\n\n用户批注：\n{}\n\n用户问题：\n{}",
-                manifest,
-                if notes_str.is_empty() { "（无）" } else { &notes_str },
-                question);
-            vec![
-                ai_client::ChatMsg { role: "system".into(), content: "你是个人知识库助手。".into() },
-                ai_client::ChatMsg { role: "user".into(), content: prompt },
-            ]
+            let messages = vec![
+                ai_client::ChatMsg { role: "system".into(), content: "你是个人知识库助手。通过工具按需读取资料并回答用户问题。".into() },
+                ai_client::ChatMsg { role: "user".into(), content: question.clone() },
+            ];
+            let react_result = ai_client::react_completion(&settings, &messages, &mut workspace, None, 10)
+                .await.map_err(|e| e.to_string())?;
+            (react_result.answer, react_result.generated_files)
         } else {
             let material = context_chunks.iter()
                 .map(|c| format!("[{}：{}，第 {} 页]\n{}", c.label, c.document_name, c.page.unwrap_or(1), c.text))
@@ -137,12 +134,14 @@ pub async fn send_chat_message(
             } else {
                 question_with_quote
             };
-            vec![
+            let messages = vec![
                 ai_client::ChatMsg { role: "system".into(), content: system },
                 ai_client::ChatMsg { role: "user".into(), content: prompt },
-            ]
+            ];
+            let answer = ai_client::completion(&settings, &messages, None).await.map_err(|e| e.to_string())?;
+            (answer, Vec::new())
         };
-        ai_client::completion(&settings, &messages, None).await.map_err(|e| e.to_string())?
+        result
     } else {
         let run_id = Uuid::new_v4();
         let request = AgentRunRequest {
@@ -156,17 +155,20 @@ pub async fn send_chat_message(
 
         let (mut child, _stdout_file, answer_file) = agent_runner::run_agent(&backend, &request, run_id)
             .map_err(|e| e.to_string())?;
+        agent_runner::register_process_sync(run_id, child);
 
-        // Wait for process
-        let status = child.wait().map_err(|e| e.to_string())?;
+        // Wait for process via registry (allows stop_agent to kill it)
+        let status = agent_runner::wait_process_sync(run_id).map_err(|e| e.to_string())?;
+        agent_runner::unregister_process_sync(run_id);
         if !status.success() {
             return Err(format!("Agent exited with status: {:?}", status.code()));
         }
 
-        std::fs::read_to_string(&answer_file)
+        let answer = std::fs::read_to_string(&answer_file)
             .unwrap_or_else(|_| "Agent 未返回回答".to_string())
             .trim()
-            .to_string()
+            .to_string();
+        (answer, Vec::new())
     };
 
     // Phase 3: Acquire lock again to save state
@@ -184,7 +186,7 @@ pub async fn send_chat_message(
                 Some(context_chunks.into_iter().map(|c| ContextChunk { id: Uuid::new_v4(), ..c }).collect())
             },
             backend: Some(backend),
-            generated_files: None,
+            generated_files: if generated_files.is_empty() { None } else { Some(std::mem::take(&mut generated_files)) },
             pending_imports: None,
             trace_events: None,
             created_at: Utc::now(),

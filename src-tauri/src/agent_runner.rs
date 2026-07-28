@@ -29,6 +29,12 @@ pub fn terminate_process_sync(run_id: Uuid) {
     }
 }
 
+pub fn wait_process_sync(run_id: Uuid) -> std::io::Result<std::process::ExitStatus> {
+    let mut child = PROCESS_REGISTRY.lock().unwrap().remove(&run_id)
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "Process not found"))?;
+    child.wait()
+}
+
 pub fn was_cancelled(run_id: Uuid) -> bool {
     CANCELLED.lock().unwrap().contains(&run_id)
 }

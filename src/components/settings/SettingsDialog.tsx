@@ -2,12 +2,19 @@ import { useState, useEffect } from "react";
 import { useStore } from "../../state/store";
 
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
-  const { settings, data } = useStore();
-  const [apiKey, setApiKey] = useState("");
+  const { settings, data, saveSettings, saveApiKey } = useStore();
+  const [apiKey, setApiKey] = useState(settings.api_key || "");
   const [testResult, setTestResult] = useState("");
   const [testing, setTesting] = useState(false);
   const [libraryPath, setLibraryPath] = useState("");
   const [switchMsg, setSwitchMsg] = useState("");
+
+  // Save non-sensitive settings whenever they change (debounced)
+  useEffect(() => {
+    const timer = setTimeout(() => { saveSettings(); }, 500);
+    return () => clearTimeout(timer);
+  }, [settings.provider, settings.base_url, settings.model, settings.chat_backend,
+      settings.chat_placement, settings.api_context_mode, settings.vision_enabled]);
 
   useEffect(() => {
     const loadPath = async () => {
@@ -20,6 +27,11 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     loadPath();
   }, []);
 
+  const handleApiKeyChange = (value: string) => {
+    setApiKey(value);
+    saveApiKey(value);
+  };
+
   const handleTestConnection = async () => {
     setTesting(true);
     setTestResult("正在测试…");
@@ -27,7 +39,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
       const { invoke } = await import("@tauri-apps/api/core");
       const result = await invoke<string>("test_api_connection", {
         model: settings.model,
-        baseUrl: settings.base_url,
+        base_url: settings.base_url,
+        api_key: apiKey,
       });
       setTestResult(result);
     } catch (e: any) {
@@ -54,7 +67,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
 
       const { invoke } = await import("@tauri-apps/api/core");
       setSwitchMsg("正在切换…");
-      await invoke("switch_library_root", { newRoot: dir, migrate: !!migrate });
+      await invoke("switch_library_root", { new_root: dir, migrate: !!migrate });
 
       // Reset global state
       useStore.setState({
@@ -209,8 +222,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
                   <input
                     type="password"
                     value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    placeholder="输入后保存…"
+                    onChange={(e) => handleApiKeyChange(e.target.value)}
+                    placeholder="输入 API Key…"
                     className="flex-1 text-sm px-3 py-1.5 border border-[var(--color-border)] rounded-md bg-[var(--color-bg)]"
                   />
                 </div>

@@ -9,7 +9,7 @@ export default function App() {
   const {
     libraryVisible, chatPlacement, loading, loadData,
     currentDocument, tabs, openDocument, closeDocument,
-    showSettings,
+    showSettings, error,
   } = useStore();
 
   useEffect(() => {
@@ -40,6 +40,12 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[var(--color-bg)]">
+      {/* Error banner (e.g. failed reload after library switch) */}
+      {error && (
+        <div className="fixed top-0 left-0 right-0 z-[100] px-4 py-2 bg-red-600 text-white text-xs text-center">
+          数据加载失败：{error}
+        </div>
+      )}
       {/* Library sidebar */}
       {showLibraryPanel && (
         <div className={`flex flex-col border-r border-[var(--color-border)] bg-[var(--color-sidebar)] ${showChatSidebar ? "flex-1" : "w-[280px] flex-shrink-0"}`}>

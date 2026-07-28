@@ -5,6 +5,7 @@ import type {
   AppSettings, ReaderSelection, DocumentOutlineEntry,
   ExtractedDocument, TopicRecommendation, ChatPlacement,
 } from "../types/models";
+import { loadApiKey, saveApiKey } from "./secureStore";
 
 interface KnowledgeStore {
   // Data
@@ -45,6 +46,8 @@ interface KnowledgeStore {
   // Actions
   setData: (data: KnowledgeData) => void;
   loadData: () => Promise<void>;
+  saveSettings: () => Promise<void>;
+  saveApiKey: (key: string) => Promise<void>;
 
   // Library
   importFiles: (paths: string[]) => Promise<string[]>;
@@ -136,12 +139,38 @@ export const useStore = create<KnowledgeStore>((set, get) => ({
     try {
       set({ loading: true, error: null });
       const { invoke } = await import("@tauri-apps/api/core");
-      const data = await invoke<KnowledgeData>("load_full_state");
+      const [data, savedSettings, apiKey] = await Promise.all([
+        invoke<KnowledgeData>("load_full_state"),
+        invoke<AppSettings>("get_settings").catch(() => null),
+        loadApiKey(),
+      ]);
       console.log("[loadData] loaded", data.documents?.length, "docs,", data.topics?.length, "topics");
-      set({ data, loading: false });
+      const settings = savedSettings
+        ? { ...savedSettings, api_key: apiKey || undefined }
+        : { ...get().settings, api_key: apiKey || undefined };
+      set({ data, settings, loading: false });
     } catch (e: any) {
       console.error("[loadData] failed:", e);
       set({ error: e.toString(), loading: false });
+    }
+  },
+
+  saveSettings: async () => {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const { settings } = get();
+      await invoke("save_settings", { settings });
+    } catch (e: any) {
+      console.error("[saveSettings] failed:", e);
+    }
+  },
+
+  saveApiKey: async (key: string) => {
+    try {
+      await saveApiKey(key);
+      set((s) => ({ settings: { ...s.settings, api_key: key } }));
+    } catch (e: any) {
+      console.error("[saveApiKey] failed:", e);
     }
   },
 
@@ -160,7 +189,7 @@ export const useStore = create<KnowledgeStore>((set, get) => ({
 
   createTopic: async (name, parentId) => {
     const { invoke } = await import("@tauri-apps/api/core");
-    const topic = await invoke<Topic | null>("create_topic", { name, parentId });
+    const topic = await invoke<Topic | null>("create_topic", { name, parent_id: parentId });
     await get().loadData();
     return topic;
   },
@@ -182,7 +211,7 @@ export const useStore = create<KnowledgeStore>((set, get) => ({
 
   searchDocuments: async (query, topicId) => {
     const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<KnowledgeDocument[]>("search", { query, topicId });
+    return invoke<KnowledgeDocument[]>("search", { query, topic_id: topicId });
   },
 
   openDocument: (doc) => {
@@ -219,14 +248,14 @@ export const useStore = create<KnowledgeStore>((set, get) => ({
     try {
       const { invoke } = await import("@tauri-apps/api/core");
       const [extracted, outline, bytes] = await Promise.all([
-        invoke<ExtractedDocument>("get_extracted_content", { documentId: docId }),
-        invoke<DocumentOutlineEntry[]>("get_document_outline", { documentId: docId }),
-        invoke<number[]>("read_document_bytes", { documentId: docId }),
+        invoke<ExtractedDocument>("get_extracted_content", { document_id: docId }),
+        invoke<DocumentOutlineEntry[]>("get_document_outline", { document_id: docId }),
+        invoke<Uint8Array>("read_document_bytes", { document_id: docId }),
       ]);
       set({
         extractedContent: extracted,
         outlineEntries: outline,
-        documentBytes: new Uint8Array(bytes),
+        documentBytes: bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes as unknown as ArrayBuffer),
       });
     } catch (e: any) {
       console.error("Failed to load document:", e);
@@ -236,7 +265,7 @@ export const useStore = create<KnowledgeStore>((set, get) => ({
   addAnnotation: async (docId, sel, kind, note = "") => {
     const { invoke } = await import("@tauri-apps/api/core");
     const ann = await invoke<KnowledgeAnnotation>("add_annotation", {
-      documentId: docId, selection: sel, kind, note,
+      document_id: docId, selection: sel, kind, note,
     });
     await get().loadData();
     return ann;
@@ -256,7 +285,7 @@ export const useStore = create<KnowledgeStore>((set, get) => ({
 
   toggleBookmark: async (docId, pageIndex) => {
     const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<boolean>("toggle_bookmark", { documentId: docId, pageIndex });
+    return invoke<boolean>("toggle_bookmark", { document_id: docId, page_index: pageIndex });
   },
 
   sendMessage: async () => {
@@ -270,16 +299,17 @@ export const useStore = create<KnowledgeStore>((set, get) => ({
       const result = await invoke<ChatMessage>("send_chat_message", {
         question: draft.trim(),
         quote: quote || null,
-        documentIds: Array.from(selectedDocumentIds),
-        topicIds: Array.from(selectedTopicIds),
-        includeCurrent,
-        includeAnnotations,
-        conversationId: conversation.id,
+        document_ids: Array.from(selectedDocumentIds),
+        topic_ids: Array.from(selectedTopicIds),
+        include_current: includeCurrent,
+        include_annotations: includeAnnotations,
+        conversation_id: conversation.id,
         backend: settings.chat_backend,
         model: settings.model,
-        baseUrl: settings.base_url,
-        apiContextMode: settings.api_context_mode,
-        visionEnabled: settings.vision_enabled,
+        base_url: settings.base_url,
+        api_context_mode: settings.api_context_mode,
+        vision_enabled: settings.vision_enabled,
+        api_key: settings.api_key || "",
       });
 
       set((s) => ({

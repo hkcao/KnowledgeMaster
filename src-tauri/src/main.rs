@@ -12,6 +12,20 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            let local_data_dir = app
+                .path()
+                .app_local_data_dir()
+                .expect("could not resolve app local data path");
+            std::fs::create_dir_all(&local_data_dir)
+                .expect("could not create app local data dir");
+            if let Ok(data_dir) = app.path().app_data_dir() {
+                let _ = std::fs::create_dir_all(&data_dir);
+            }
+            let salt_path = local_data_dir.join("salt.txt");
+            app.handle().plugin(
+                tauri_plugin_stronghold::Builder::with_argon2(&salt_path).build(),
+            )?;
+
             let store = KnowledgeStore::new(None)
                 .expect("Failed to initialize knowledge store");
             app.manage(AppState(Mutex::new(store)));

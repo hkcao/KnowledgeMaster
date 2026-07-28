@@ -82,7 +82,7 @@ export function LibrarySidebar({ currentDocument, onOpen }: Props) {
       const migrate = currentDocs === 0 || confirm("是否将现有资料迁移到新目录？\n\n选择「确定」复制现有资料到新目录\n选择「取消」打开新目录（不迁移资料）");
 
       const { invoke } = await import("@tauri-apps/api/core");
-      await invoke("switch_library_root", { newRoot: dir, migrate });
+      await invoke("switch_library_root", { new_root: dir, migrate });
 
       // Reset ALL local state
       setQuery("");
@@ -110,6 +110,14 @@ export function LibrarySidebar({ currentDocument, onOpen }: Props) {
   };
 
   const displayDocs = searchResults || documents;
+
+  const handleSelectTopic = (t: Topic) => {
+    useStore.setState({ selectedTopicId: t.id });
+    performSearch(query);
+  };
+  const handleRenameTopic = (t: Topic) => { setRenamingTopic(t); setRenameName(t.name); };
+  const handleDeleteTopic = (t: Topic) => { deleteTopic(t.id); };
+  const handleNewChildTopic = (t: Topic) => { setShowNewTopic(true); setNewTopicParentId(t.id); };
 
   return (
     <div className="flex flex-col h-full text-sm">
@@ -172,13 +180,10 @@ export function LibrarySidebar({ currentDocument, onOpen }: Props) {
             currentDocument={currentDocument}
             topicIds={data?.document_topics || []}
             childrenOf={childrenOf}
-            onSelect={() => {
-              useStore.setState({ selectedTopicId: topic.id });
-              performSearch(query);
-            }}
-            onRename={() => { setRenamingTopic(topic); setRenameName(topic.name); }}
-            onDelete={() => deleteTopic(topic.id)}
-            onNewChild={() => { setShowNewTopic(true); setNewTopicParentId(topic.id); }}
+            onSelect={handleSelectTopic}
+            onRename={handleRenameTopic}
+            onDelete={handleDeleteTopic}
+            onNewChild={handleNewChildTopic}
             onOpen={onOpen}
             onDeleteDoc={deleteDocument}
           />
@@ -309,10 +314,10 @@ function TopicItem({
   currentDocument: KnowledgeDocument | null;
   topicIds: { document_id: string; topic_id: string }[];
   childrenOf: (parentId: string) => Topic[];
-  onSelect: () => void;
-  onRename: () => void;
-  onDelete: () => void;
-  onNewChild: () => void;
+  onSelect: (topic: Topic) => void;
+  onRename: (topic: Topic) => void;
+  onDelete: (topic: Topic) => void;
+  onNewChild: (topic: Topic) => void;
   onOpen: (doc: KnowledgeDocument) => void;
   onDeleteDoc: (id: string) => Promise<void>;
 }) {
@@ -329,7 +334,7 @@ function TopicItem({
           selectedTopicId === topic.id ? "bg-[var(--color-accent-light)]" : ""
         }`}
         style={{ paddingLeft: `${6 + depth * 12}px` }}
-        onClick={onSelect}
+        onClick={() => onSelect(topic)}
       >
         <button
           onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
@@ -341,9 +346,9 @@ function TopicItem({
         <span className="flex-1 text-sm truncate">{topic.name}</span>
         <span className="text-[10px] text-secondary mr-1">{linkedDocs.length}</span>
         <div className="hidden group-hover:flex items-center gap-0.5">
-          <button onClick={(e) => { e.stopPropagation(); onNewChild(); }} className="text-[10px] px-0.5 hover:opacity-70" title="新建子主题">+</button>
-          <button onClick={(e) => { e.stopPropagation(); onRename(); }} className="text-[10px] px-0.5 hover:opacity-70" title="重命名">✎</button>
-          <button onClick={(e) => { e.stopPropagation(); onDelete(); }} className="text-[10px] px-0.5 hover:opacity-70 text-red-500" title="删除">×</button>
+          <button onClick={(e) => { e.stopPropagation(); onNewChild(topic); }} className="text-[10px] px-0.5 hover:opacity-70" title="新建子主题">+</button>
+          <button onClick={(e) => { e.stopPropagation(); onRename(topic); }} className="text-[10px] px-0.5 hover:opacity-70" title="重命名">✎</button>
+          <button onClick={(e) => { e.stopPropagation(); onDelete(topic); }} className="text-[10px] px-0.5 hover:opacity-70 text-red-500" title="删除">×</button>
         </div>
       </div>
 
@@ -359,10 +364,10 @@ function TopicItem({
               currentDocument={currentDocument}
               topicIds={topicIds}
               childrenOf={childrenOf}
-              onSelect={() => {}}
-              onRename={() => {}}
-              onDelete={() => {}}
-              onNewChild={() => {}}
+              onSelect={onSelect}
+              onRename={onRename}
+              onDelete={onDelete}
+              onNewChild={onNewChild}
               onOpen={onOpen}
               onDeleteDoc={onDeleteDoc}
             />

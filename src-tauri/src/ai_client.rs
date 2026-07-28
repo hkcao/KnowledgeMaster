@@ -50,7 +50,7 @@ pub async fn completion(settings: &AppSettings, messages: &[ChatMsg], image_png:
             temperature: 0.2,
         };
         client.post(&endpoint)
-            .header("Authorization", format!("Bearer {}", settings.provider))
+            .header("Authorization", format!("Bearer {}", settings.api_key))
             .json(&body)
             .send()
             .await?
@@ -61,7 +61,7 @@ pub async fn completion(settings: &AppSettings, messages: &[ChatMsg], image_png:
             temperature: 0.2,
         };
         client.post(&endpoint)
-            .header("Authorization", format!("Bearer {}", settings.provider))
+            .header("Authorization", format!("Bearer {}", settings.api_key))
             .header("Content-Type", "application/json")
             .json(&body)
             .send()
@@ -128,7 +128,7 @@ pub async fn react_completion(
         };
 
         let response = client.post(&endpoint)
-            .header("Authorization", format!("Bearer {}", settings.provider))
+            .header("Authorization", format!("Bearer {}", settings.api_key))
             .header("Content-Type", "application/json")
             .json(&body)
             .send()

@@ -25,7 +25,7 @@ export function ReaderPane() {
       const loadBookmark = async () => {
         try {
           const { invoke } = await import("@tauri-apps/api/core");
-          const bp = await invoke<number | null>("get_bookmark", { documentId: currentDocument.id });
+          const bp = await invoke<number | null>("get_bookmark", { document_id: currentDocument.id });
           setBookmarkPage(bp);
         } catch {}
       };
@@ -95,8 +95,8 @@ export function ReaderPane() {
     try {
       const { invoke } = await import("@tauri-apps/api/core");
       const result = await invoke<boolean>("toggle_bookmark", {
-        documentId: currentDocument.id,
-        pageIndex: currentPageIndex,
+        document_id: currentDocument.id,
+        page_index: currentPageIndex,
       });
       setBookmarkPage(result ? currentPageIndex : null);
     } catch {}
@@ -111,7 +111,7 @@ export function ReaderPane() {
         defaultPath: currentDocument.name,
       });
       if (dest) {
-        await invoke("export_original_document", { documentId: currentDocument.id, destination: dest });
+        await invoke("export_original_document", { document_id: currentDocument.id, destination: dest });
       }
     } catch (e: any) {
       console.error("Export failed:", e);
@@ -123,10 +123,10 @@ export function ReaderPane() {
     try {
       const { save } = await import("@tauri-apps/plugin-dialog");
       const { invoke } = await import("@tauri-apps/api/core");
-      const filename = await invoke<string>("get_annotated_filename", { documentId: currentDocument.id });
+      const filename = await invoke<string>("get_annotated_filename", { document_id: currentDocument.id });
       const dest = await save({ defaultPath: filename });
       if (dest) {
-        await invoke("export_annotated_document", { documentId: currentDocument.id, destination: dest });
+        await invoke("export_annotated_document", { document_id: currentDocument.id, destination: dest });
       }
     } catch (e: any) {
       console.error("Export failed:", e);
