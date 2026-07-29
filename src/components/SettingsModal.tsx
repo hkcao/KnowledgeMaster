@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
+import { confirm, open } from "@tauri-apps/plugin-dialog";
 import { Eye, FolderOpen, KeyRound, Play, Save, Square, Terminal, X } from "lucide-react";
 import { api } from "../api";
 import type { AppSettings, BootstrapState, ChatBackend, UUID } from "../types";
@@ -16,6 +16,7 @@ export default function SettingsModal({
   const [settings, setSettings] = useState(state.settings);
   const [key, setKey] = useState("");
   const [status, setStatus] = useState("");
+  const [switchingRoot, setSwitchingRoot] = useState(false);
   const [testingAgent, setTestingAgent] = useState<{ backend: "claudeCode" | "codex"; runId: UUID } | null>(null);
 
   async function persist(next: AppSettings) {
@@ -26,13 +27,22 @@ export default function SettingsModal({
 
   async function chooseRoot() {
     const selected = await open({ directory: true, multiple: false, defaultPath: state.rootPath });
-    if (!selected) return;
-    const migrate = state.data.documents.length === 0 || window.confirm("迁移现有知识库？\n确认会复制 source、主题、批注和对话；取消将直接打开或创建目标知识库。");
+    if (!selected || Array.isArray(selected)) return;
+    const migrate = state.data.documents.length === 0 || await confirm(
+      "确认会复制文档、主题、批注和对话；取消将直接打开或创建所选 source 知识库。",
+      { title: "迁移现有知识库？", kind: "info" }
+    );
+    setSwitchingRoot(true);
+    setStatus("正在切换 source 目录…");
     try {
-      onState(await api.setLibraryRoot(selected, migrate));
-      setStatus("知识库目录已切换");
+      const next = await api.setLibraryRoot(selected, migrate);
+      setSettings(next.settings);
+      onState(next);
+      setStatus(`source 目录已切换到 ${next.rootPath}`);
     } catch (value) {
-      setStatus(String(value));
+      setStatus(`切换失败：${String(value)}`);
+    } finally {
+      setSwitchingRoot(false);
     }
   }
 
@@ -111,11 +121,13 @@ export default function SettingsModal({
 
           <fieldset>
             <legend>知识库与 source 目录</legend>
+            <span className="setting-label">当前 source 目录</span>
             <code className="path-display">{state.rootPath}</code>
             <div className="button-row">
-              <button onClick={chooseRoot}><FolderOpen size={14} />更改目录</button>
+              <button disabled={switchingRoot} onClick={chooseRoot}><FolderOpen size={14} />{switchingRoot ? "正在切换…" : "更改目录"}</button>
               <button onClick={() => api.revealPath()}><Terminal size={14} />在文件管理器中打开</button>
             </div>
+            <p className="muted">可直接选择已有的 source 目录；若选择普通文件夹，应用会在其中使用 source 子目录。切换成功后左侧文件视图会立即刷新。</p>
             <p className="muted">{state.rootPath.includes("CloudDocs") ? "当前目录由 iCloud Drive 同步" : state.rootPath.toLocaleLowerCase().includes("onedrive") ? "当前目录由 OneDrive 同步" : "当前为本地目录"}</p>
           </fieldset>
           {status && <p className="settings-status">{status}</p>}

@@ -102,6 +102,23 @@ pub fn save_root_preference(root: &Path) -> Result<(), String> {
 pub fn source_dir(root: &Path) -> PathBuf {
     root.join("source")
 }
+
+pub fn library_root_from_selection(path: &Path) -> Result<PathBuf, String> {
+    let selected = absolute_clean(path)?;
+    let selected_source = selected
+        .file_name()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| value.eq_ignore_ascii_case("source"));
+    if selected_source {
+        selected
+            .parent()
+            .map(Path::to_path_buf)
+            .ok_or_else(|| "source 目录缺少上级目录".to_string())
+    } else {
+        Ok(selected)
+    }
+}
+
 pub fn documents_dir(root: &Path) -> PathBuf {
     source_dir(root).join("documents")
 }
@@ -167,7 +184,7 @@ pub fn save_data(root: &Path, data: &KnowledgeData) -> Result<(), String> {
 }
 
 pub fn switch_root(inner: &mut Inner, target: PathBuf, migrate: bool) -> Result<(), String> {
-    let target = absolute_clean(&target)?;
+    let target = library_root_from_selection(&target)?;
     if migrate && target != inner.root {
         fs::create_dir_all(&target).map_err(error)?;
         for name in ["knowledge.json", "knowledge.json.bak", "source"] {
@@ -1045,5 +1062,15 @@ mod tests {
         assert!(!value.contains(':'));
         assert!(!value.contains('/'));
         assert!(!value.contains('\\'));
+    }
+
+    #[test]
+    fn selecting_source_directory_resolves_to_its_library_root() {
+        let root = std::env::temp_dir()
+            .join("KnowledgeMaster-tests")
+            .join("Knowledges");
+        let selected = root.join("source");
+        assert_eq!(library_root_from_selection(&selected).unwrap(), root);
+        assert_eq!(library_root_from_selection(&root).unwrap(), root);
     }
 }

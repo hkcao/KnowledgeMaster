@@ -23,7 +23,9 @@ fn snapshot(state: &AppState) -> Result<store::Inner, String> {
 fn bootstrap_value(state: &AppState) -> Result<BootstrapState, String> {
     let inner = snapshot(state)?;
     Ok(BootstrapState {
-        root_path: inner.root.to_string_lossy().into_owned(),
+        root_path: store::source_dir(&inner.root)
+            .to_string_lossy()
+            .into_owned(),
         data: inner.data,
         settings: inner.settings,
         agent_availability: agent::availability(),
@@ -66,13 +68,8 @@ fn set_library_root(
 
 #[tauri::command]
 fn reveal_path(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    let target = state
-        .inner
-        .lock()
-        .map_err(error)?
-        .root
-        .to_string_lossy()
-        .into_owned();
+    let target = state.inner.lock().map_err(error)?.root.clone();
+    let target = store::source_dir(&target).to_string_lossy().into_owned();
     app.opener().open_path(target, None::<&str>).map_err(error)
 }
 

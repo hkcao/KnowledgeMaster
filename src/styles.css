@@ -239,21 +239,25 @@ details > summary::-webkit-details-marker { display: none; }
 .history-list > button { width: 100%; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; justify-content: flex-start; text-align: left; }
 .history-list > button > span { display: grid; }
 .pending-list { max-height: 290px; overflow: auto; display: grid; gap: 7px; padding: 8px; border: 1px solid var(--border); border-radius: 8px; }
-.settings-modal { width: min(720px, 95vw); height: min(760px, 94vh); display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+.settings-modal { width: min(720px, 95vw); height: min(760px, 94vh); display: flex; flex-direction: column; padding: 0; overflow: hidden; font-size: 13px; line-height: 1.45; }
 .settings-modal > header { flex: 0 0 52px; display: flex; align-items: center; justify-content: space-between; padding: 0 18px; border-bottom: 1px solid var(--border); }
-.settings-modal > header h2 { margin: 0; }
+.settings-modal > header h2 { margin: 0; font-size: 17px; }
 .settings-scroll { min-height: 0; flex: 1; overflow: auto; padding: 15px 18px; display: grid; gap: 14px; }
 .settings-modal > .modal-actions { flex: 0 0 55px; padding: 0 18px; margin: 0; border-top: 1px solid var(--border); }
 .settings-modal fieldset { border: 1px solid var(--border); border-radius: 9px; background: var(--surface); padding: 12px; display: grid; gap: 9px; }
-.settings-modal legend { padding: 0 5px; font-weight: 700; font-size: 12px; }
-.form-row { display: grid; grid-template-columns: 150px 1fr; align-items: center; gap: 10px; font-size: 11px; }
-.check-row { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+.settings-modal legend { padding: 0 5px; font-weight: 700; font-size: 13px; }
+.settings-modal button, .settings-modal input, .settings-modal select, .settings-modal summary { font-size: 13px; }
+.settings-modal .muted { margin: 0; font-size: 12px; line-height: 1.5; }
+.form-row { display: grid; grid-template-columns: 150px 1fr; align-items: center; gap: 10px; font-size: 13px; }
+.check-row { display: flex; align-items: center; gap: 6px; font-size: 13px; }
 .button-row { display: flex; flex-wrap: wrap; gap: 6px; }
-.agent-setting { display: grid; grid-template-columns: 90px 1fr auto; align-items: center; gap: 8px; font-size: 10px; }
+.agent-setting { display: grid; grid-template-columns: 90px 1fr auto; align-items: center; gap: 8px; font-size: 13px; }
 .agent-setting code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.instruction { padding: 8px; display: grid; gap: 6px; color: var(--text-muted); font-size: 10px; }
+.instruction { padding: 8px; display: grid; gap: 6px; color: var(--text-muted); font-size: 12px; line-height: 1.55; }
 .instruction code, .path-display { white-space: pre-wrap; overflow-wrap: anywhere; padding: 7px; border-radius: 6px; background: var(--surface-muted); }
-.settings-status { margin: 0; color: var(--text-muted); font-size: 10px; }
+.path-display { font-size: 12px; line-height: 1.5; }
+.setting-label { font-size: 13px; font-weight: 600; }
+.settings-status { margin: 0; color: var(--text-muted); font-size: 12px; }
 .toast { z-index: 1500; position: fixed; left: 50%; bottom: 25px; transform: translateX(-50%); max-width: 70vw; padding: 9px 13px; border-radius: 9px; background: #26292f; color: white; box-shadow: 0 8px 30px rgba(0,0,0,.3); }
 .toast.error { background: #a42534; }
 
