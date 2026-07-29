@@ -1,0 +1,41 @@
+[package]
+name = "knowledge-master"
+version = "0.1.0"
+description = "知屿 KnowledgeMaster - local-first research knowledge workspace"
+authors = ["KnowledgeMaster Contributors"]
+edition = "2021"
+
+[lib]
+name = "knowledge_master_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "6"
+keyring = { version = "3", features = ["apple-native", "windows-native"] }
+lopdf = "0.38"
+pdf-extract = "0.10"
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+scraper = "0.24"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tempfile = "3"
+tokio = { version = "1", features = ["process", "io-util", "time", "sync", "macros"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+walkdir = "2"
+zip = "4"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+pretty_assertions = "1"

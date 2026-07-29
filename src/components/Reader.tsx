@@ -1,0 +1,683 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { save } from "@tauri-apps/plugin-dialog";
+import DOMPurify from "dompurify";
+import {
+  Bookmark,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  Highlighter,
+  ListTree,
+  MessageSquareText,
+  Minus,
+  Plus,
+  Quote,
+  Sparkles,
+  Underline,
+  X
+} from "lucide-react";
+import * as pdfjs from "pdfjs-dist";
+import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
+import { api, annotationsFor } from "../api";
+import type {
+  AnnotationKind,
+  AnnotationRect,
+  KnowledgeAnnotation,
+  KnowledgeData,
+  KnowledgeDocument,
+  ReaderDocumentPayload,
+  ReaderQuote,
+  UUID
+} from "../types";
+import { displayTitle, formatBytes } from "../utils";
+import MarkdownView from "./MarkdownView";
+
+pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+
+interface Props {
+  document?: KnowledgeDocument | null;
+  data: KnowledgeData;
+  focusedAnnotationId?: UUID | null;
+  layoutRevision: number;
+  onData: (data: KnowledgeData) => void;
+  onAsk: (quote: ReaderQuote) => void;
+}
+
+interface SelectionState {
+  text: string;
+  page: number | null;
+  rects: AnnotationRect[];
+  x: number;
+  y: number;
+  imageBase64?: string;
+}
+
+interface OutlineEntry {
+  id: string;
+  title: string;
+  level: number;
+  page?: number;
+  anchor?: string;
+}
+
+export default function Reader({ document, data, focusedAnnotationId, layoutRevision, onData, onAsk }: Props) {
+  const [payload, setPayload] = useState<ReaderDocumentPayload | null>(null);
+  const [selection, setSelection] = useState<SelectionState | null>(null);
+  const [showOutline, setShowOutline] = useState(false);
+  const [showAnnotations, setShowAnnotations] = useState(false);
+  const [outline, setOutline] = useState<OutlineEntry[]>([]);
+  const [editing, setEditing] = useState<KnowledgeAnnotation | { selection: SelectionState } | null>(null);
+  const [noteDraft, setNoteDraft] = useState("");
+  const [error, setError] = useState("");
+  const [navigationPage, setNavigationPage] = useState<number | null>(null);
+  const readerRef = useRef<HTMLDivElement>(null);
+  const currentPageRef = useRef(0);
+
+  useEffect(() => {
+    setPayload(null);
+    setSelection(null);
+    setOutline([]);
+    setNavigationPage(null);
+    if (!document) return;
+    api.documentPayload(document.id).then(setPayload).catch((value) => setError(String(value)));
+  }, [document?.id]);
+
+  useEffect(() => {
+    if (!focusedAnnotationId) return;
+    const annotation = data.annotations.find((item) => item.id === focusedAnnotationId);
+    if (!annotation) return;
+    if (annotation.page) setNavigationPage(annotation.page - 1);
+    setEditing(annotation);
+    setNoteDraft(annotation.note);
+  }, [focusedAnnotationId]);
+
+  useEffect(() => {
+    if (!document || document.extension !== ".pdf") return;
+    setNavigationPage(currentPageRef.current);
+  }, [layoutRevision]);
+
+  if (!document) {
+    return <main className="reader-empty"><div className="empty-state"><Quote size={34} /><strong>选择一份资料</strong><span>导入或从左侧打开 PDF、Word、HTML、Markdown 和文本文件。</span></div></main>;
+  }
+
+  const annotations = annotationsFor(data, document.id);
+  const bookmark = data.bookmarks.find((item) => item.documentId === document.id)?.pageIndex;
+
+  async function addAnnotation(kind: AnnotationKind, note = "") {
+    if (!selection) return;
+    onData(await api.addAnnotation(document!.id, selection.text, selection.page, kind, note, selection.rects));
+    setSelection(null);
+    window.getSelection()?.removeAllRanges();
+  }
+
+  async function saveNote() {
+    const value = noteDraft.trim();
+    if (!value) return;
+    if (editing && "selection" in editing) {
+      setSelection(editing.selection);
+      const source = editing.selection;
+      onData(await api.addAnnotation(document!.id, source.text, source.page, "note", value, source.rects));
+      setSelection(null);
+    } else if (editing) {
+      onData(await api.updateAnnotation(editing.id, value));
+    }
+    setEditing(null);
+    setNoteDraft("");
+  }
+
+  function askSelection() {
+    if (!selection) return;
+    onAsk({
+      text: selection.text,
+      documentId: document!.id,
+      documentName: displayTitle(document!),
+      page: selection.page,
+      imageBase64: selection.imageBase64
+    });
+    setSelection(null);
+    window.getSelection()?.removeAllRanges();
+  }
+
+  async function exportDocument(annotated: boolean) {
+    const stem = document!.name.replace(/\.[^.]+$/, "");
+    const ext = document!.name.split(".").pop() || "dat";
+    const destination = await save({
+      defaultPath: annotated ? `${stem}-带批注.${ext}` : document!.name,
+      filters: [{ name: annotated ? "带批注文档" : "原文档", extensions: [ext] }]
+    });
+    if (!destination) return;
+    try {
+      await api.exportDocument(document!.id, destination, annotated);
+    } catch (value) {
+      setError(String(value));
+    }
+  }
+
+  return (
+    <main className="reader-shell" ref={readerRef}>
+      <header className="reader-header">
+        <div className="document-heading">
+          <Quote size={18} />
+          <span><strong>{displayTitle(document)}</strong><small>{formatBytes(document.size)}{document.pageCount ? ` · ${document.pageCount} 页` : ""}</small></span>
+        </div>
+        <button className={showOutline ? "active" : ""} onClick={() => setShowOutline(!showOutline)}><ListTree size={15} />目录</button>
+        <details className="header-menu">
+          <summary><Download size={15} />导出</summary>
+          <div className="popover-menu right">
+            <button onClick={() => exportDocument(false)}>导出原文档…</button>
+            <button disabled={!annotations.length} onClick={() => exportDocument(true)}>导出带批注版本…</button>
+          </div>
+        </details>
+        <button disabled={!annotations.length} onClick={() => setShowAnnotations(true)}>批注 {annotations.length}</button>
+      </header>
+      <div className="reader-content">
+        {showOutline && (
+          <aside className="outline-panel">
+            <header><strong>文档目录</strong><button className="icon-button" onClick={() => setShowOutline(false)}><X size={15} /></button></header>
+            <div>
+              {outline.length ? outline.map((entry) => (
+                <button
+                  key={entry.id}
+                  style={{ paddingLeft: 12 + Math.max(0, entry.level - 1) * 12 }}
+                  onClick={() => {
+                    if (entry.page != null) setNavigationPage(entry.page);
+                    if (entry.anchor) window.document.getElementById(entry.anchor)?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }}
+                >{entry.title}</button>
+              )) : <div className="empty-state small"><ListTree size={25} /><strong>未识别到目录</strong></div>}
+            </div>
+          </aside>
+        )}
+        <section className="document-viewport">
+          {!payload ? <div className="loading-state">正在载入文档…</div> : payload.kind === "pdf" ? (
+            <PDFReader
+              documentId={document.id}
+              base64={payload.content}
+              annotations={annotations}
+              bookmarkPage={bookmark}
+              navigationPage={navigationPage}
+              onNavigationComplete={() => setNavigationPage(null)}
+              onOutline={setOutline}
+              onSelection={setSelection}
+              onCurrentPage={(value) => { currentPageRef.current = value; }}
+              onBookmark={async (page) => onData(await api.toggleBookmark(document.id, page))}
+              onAnnotation={(annotation) => { setEditing(annotation); setNoteDraft(annotation.note); }}
+            />
+          ) : (
+            <TextReader
+              payload={payload}
+              annotations={annotations}
+              onOutline={setOutline}
+              onSelection={setSelection}
+              onAnnotation={(annotation) => {
+                setEditing(annotation);
+                setNoteDraft(annotation.note);
+              }}
+            />
+          )}
+          {selection && (
+            <div className="selection-toolbar" style={{ left: selection.x, top: selection.y }}>
+              <button onClick={askSelection}><Sparkles size={14} />Ask AI</button>
+              <button onClick={askSelection}><Quote size={14} />引用</button>
+              <i />
+              <button onClick={() => addAnnotation("highlight")}><Highlighter size={14} />高亮</button>
+              <button onClick={() => addAnnotation("underline")}><Underline size={14} />划线</button>
+              <button onClick={() => { setEditing({ selection }); setNoteDraft(""); }}><MessageSquareText size={14} />笔记</button>
+            </div>
+          )}
+        </section>
+      </div>
+
+      {editing && (
+        <div className="modal-backdrop">
+          <section className="modal annotation-editor">
+            <h2>{"selection" in editing ? "添加笔记" : "编辑笔记"}</h2>
+            <blockquote>{"selection" in editing ? editing.selection.text : editing.quote}</blockquote>
+            <textarea autoFocus value={noteDraft} onChange={(event) => setNoteDraft(event.target.value)} placeholder="记录你的理解、疑问或关联…" />
+            <div className="modal-actions">
+              {!Object.hasOwn(editing, "selection") && (
+                <button className="danger" onClick={async () => {
+                  onData(await api.deleteAnnotation((editing as KnowledgeAnnotation).id));
+                  setEditing(null);
+                }}>删除批注</button>
+              )}
+              <span />
+              <button onClick={() => setEditing(null)}>取消</button>
+              <button className="primary" disabled={!noteDraft.trim()} onClick={saveNote}>保存</button>
+            </div>
+          </section>
+        </div>
+      )}
+      {showAnnotations && (
+        <div className="modal-backdrop">
+          <section className="modal compact">
+            <h2>文档批注</h2>
+            <div className="annotation-picker">
+              {annotations.map((annotation) => (
+                <button
+                  key={annotation.id}
+                  onClick={() => {
+                    if (annotation.page) setNavigationPage(annotation.page - 1);
+                    setEditing(annotation);
+                    setNoteDraft(annotation.note);
+                    setShowAnnotations(false);
+                  }}
+                >
+                  <span>
+                    <strong>{annotation.note || annotation.kind}</strong>
+                    <small>{annotation.page ? `第 ${annotation.page} 页 · ` : ""}{annotation.quote}</small>
+                  </span>
+                </button>
+              ))}
+            </div>
+            <div className="modal-actions"><button onClick={() => setShowAnnotations(false)}>完成</button></div>
+          </section>
+        </div>
+      )}
+      {error && <div className="toast error" onClick={() => setError("")}>{error}</div>}
+    </main>
+  );
+}
+
+function TextReader({
+  payload,
+  annotations,
+  onOutline,
+  onSelection,
+  onAnnotation
+}: {
+  payload: ReaderDocumentPayload;
+  annotations: KnowledgeAnnotation[];
+  onOutline: (entries: OutlineEntry[]) => void;
+  onSelection: (value: SelectionState | null) => void;
+  onAnnotation: (annotation: KnowledgeAnnotation) => void;
+}) {
+  const host = useRef<HTMLDivElement>(null);
+  const content = useRef<HTMLDivElement>(null);
+  const [annotationPositions, setAnnotationPositions] = useState<Array<{ annotation: KnowledgeAnnotation; top: number }>>([]);
+  const markdown = payload.kind === "markdown";
+  const headings = useMemo(() => {
+    const source = payload.extractedText;
+    return [...source.matchAll(/^(#{1,6})\s+(.+)$/gm)].map((match, index) => ({
+      id: `heading-${index}`,
+      title: match[2].replace(/\s+#+$/, ""),
+      level: match[1].length,
+      anchor: `reader-heading-${index}`
+    }));
+  }, [payload.extractedText]);
+  useEffect(() => onOutline(headings), [headings]);
+  useEffect(() => {
+    const root = content.current;
+    const container = host.current;
+    if (!root || !container) return;
+    const textNodes: Text[] = [];
+    const walker = window.document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode();
+    while (node) {
+      textNodes.push(node as Text);
+      node = walker.nextNode();
+    }
+    const fullText = textNodes.map((value) => value.data).join("");
+    const offsets: number[] = [];
+    textNodes.reduce((total, value) => {
+      offsets.push(total);
+      return total + value.data.length;
+    }, 0);
+    const containerRect = container.getBoundingClientRect();
+    const positions = annotations.flatMap((annotation) => {
+      const start = fullText.indexOf(annotation.quote);
+      if (start < 0) return [];
+      const end = start + annotation.quote.length;
+      const startIndex = textNodes.findIndex((value, index) => start >= offsets[index] && start <= offsets[index] + value.data.length);
+      const endIndex = textNodes.findIndex((value, index) => end >= offsets[index] && end <= offsets[index] + value.data.length);
+      if (startIndex < 0 || endIndex < 0) return [];
+      const range = window.document.createRange();
+      range.setStart(textNodes[startIndex], Math.min(start - offsets[startIndex], textNodes[startIndex].data.length));
+      range.setEnd(textNodes[endIndex], Math.min(end - offsets[endIndex], textNodes[endIndex].data.length));
+      const rect = range.getBoundingClientRect();
+      return [{ annotation, top: rect.top - containerRect.top + container.scrollTop }];
+    });
+    setAnnotationPositions(positions);
+  }, [payload.content, annotations]);
+
+  function handleSelection() {
+    const selected = window.getSelection();
+    const text = selected?.toString().trim() || "";
+    if (!text || !host.current || !selected?.rangeCount) return onSelection(null);
+    const rect = selected.getRangeAt(0).getBoundingClientRect();
+    const parent = host.current.closest(".document-viewport")!.getBoundingClientRect();
+    onSelection({
+      text,
+      page: null,
+      rects: [],
+      x: Math.min(parent.width - 430, Math.max(8, rect.right - parent.left - 390)),
+      y: Math.max(8, rect.top - parent.top - 46)
+    });
+  }
+
+  return (
+    <div className="text-reader" ref={host} onMouseUp={handleSelection}>
+      <div ref={content}>
+        {payload.kind === "html" ? (
+          <div className="html-preview" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(payload.content, {
+            FORBID_TAGS: ["script", "iframe", "object", "embed"],
+            FORBID_ATTR: ["onerror", "onclick", "onload"]
+          }) }} />
+        ) : markdown ? (
+          <MarkdownView markdown={payload.content} headingPrefix="reader-heading" />
+        ) : (
+          <pre>{payload.content}</pre>
+        )}
+      </div>
+      {annotationPositions.map(({ annotation, top }) => (
+        <button
+          key={annotation.id}
+          className="text-annotation-chip"
+          style={{ top }}
+          title={annotation.note || annotation.quote}
+          onClick={() => onAnnotation(annotation)}
+        ><MessageSquareText size={14} /></button>
+      ))}
+    </div>
+  );
+}
+
+function PDFReader({
+  base64,
+  annotations,
+  bookmarkPage,
+  navigationPage,
+  onNavigationComplete,
+  onOutline,
+  onSelection,
+  onCurrentPage,
+  onBookmark,
+  onAnnotation
+}: {
+  documentId: UUID;
+  base64: string;
+  annotations: KnowledgeAnnotation[];
+  bookmarkPage?: number;
+  navigationPage: number | null;
+  onNavigationComplete: () => void;
+  onOutline: (entries: OutlineEntry[]) => void;
+  onSelection: (value: SelectionState | null) => void;
+  onCurrentPage: (page: number) => void;
+  onBookmark: (page: number) => void;
+  onAnnotation: (annotation: KnowledgeAnnotation) => void;
+}) {
+  const [pdf, setPDF] = useState<PDFDocumentProxy | null>(null);
+  const [pages, setPages] = useState<PDFPageProxy[]>([]);
+  const [zoom, setZoom] = useState(1.2);
+  const scroller = useRef<HTMLDivElement>(null);
+  const pageRefs = useRef(new Map<number, HTMLDivElement>());
+
+  useEffect(() => {
+    const bytes = Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
+    const task = pdfjs.getDocument({ data: bytes });
+    task.promise.then(async (value) => {
+      setPDF(value);
+      const loaded = await Promise.all(Array.from({ length: value.numPages }, (_, index) => value.getPage(index + 1)));
+      setPages(loaded);
+      const raw = await value.getOutline();
+      const entries: OutlineEntry[] = [];
+      async function walk(items: typeof raw, level: number) {
+        for (const item of items || []) {
+          let page: number | undefined;
+          if (item.dest) {
+            const destination = typeof item.dest === "string" ? await value.getDestination(item.dest) : item.dest;
+            if (destination?.[0]) page = await value.getPageIndex(destination[0]);
+          }
+          entries.push({ id: `${entries.length}-${item.title}`, title: item.title, level, page });
+          await walk(item.items, level + 1);
+        }
+      }
+      await walk(raw, 1);
+      onOutline(entries.length ? entries : loaded.map((_, index) => ({ id: `page-${index}`, title: `第 ${index + 1} 页`, level: 1, page: index })));
+      window.setTimeout(() => {
+        if (bookmarkPage != null) pageRefs.current.get(bookmarkPage)?.scrollIntoView({ block: "start" });
+      }, 150);
+    });
+    return () => { task.destroy(); };
+  }, [base64]);
+
+  useEffect(() => {
+    if (navigationPage == null) return;
+    pageRefs.current.get(navigationPage)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    onNavigationComplete();
+  }, [navigationPage, pages.length]);
+
+  useEffect(() => {
+    const target = scroller.current;
+    if (!target) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+        const page = visible ? Number((visible.target as HTMLElement).dataset.page) - 1 : null;
+        if (page != null && page >= 0) onCurrentPage(page);
+      },
+      { root: target, threshold: [0.25, 0.5, 0.75] }
+    );
+    pageRefs.current.forEach((element) => observer.observe(element));
+    return () => observer.disconnect();
+  }, [pages.length, zoom]);
+
+  useEffect(() => {
+    const target = scroller.current;
+    if (!target) return;
+    const wheel = (event: WheelEvent) => {
+      if (!event.ctrlKey) return;
+      event.preventDefault();
+      setZoom((value) => Math.min(4, Math.max(0.55, value * (event.deltaY < 0 ? 1.08 : 0.92))));
+    };
+    target.addEventListener("wheel", wheel, { passive: false });
+    return () => target.removeEventListener("wheel", wheel);
+  }, []);
+
+  function captureSelection() {
+    const selected = window.getSelection();
+    const text = selected?.toString().trim() || "";
+    if (!text || !selected?.rangeCount || !scroller.current) return onSelection(null);
+    const range = selected.getRangeAt(0);
+    const clientRects = [...range.getClientRects()];
+    const rects: AnnotationRect[] = [];
+    let targetPage: number | null = null;
+    for (const [index, element] of pageRefs.current.entries()) {
+      const pageRect = element.getBoundingClientRect();
+      const viewport = pages[index]?.getViewport({ scale: zoom });
+      if (!viewport) continue;
+      for (const rect of clientRects) {
+        const left = Math.max(rect.left, pageRect.left);
+        const right = Math.min(rect.right, pageRect.right);
+        const top = Math.max(rect.top, pageRect.top);
+        const bottom = Math.min(rect.bottom, pageRect.bottom);
+        if (right <= left || bottom <= top) continue;
+        const [x1, y1] = viewport.convertToPdfPoint(left - pageRect.left, top - pageRect.top);
+        const [x2, y2] = viewport.convertToPdfPoint(right - pageRect.left, bottom - pageRect.top);
+        rects.push({ page: index + 1, x: Math.min(x1, x2), y: Math.min(y1, y2), width: Math.abs(x2 - x1), height: Math.abs(y2 - y1) });
+        targetPage ??= index + 1;
+      }
+    }
+    const last = clientRects.at(-1)!;
+    const host = scroller.current.getBoundingClientRect();
+    onSelection({
+      text,
+      page: targetPage,
+      rects,
+      x: Math.min(host.width - 430, Math.max(8, last.right - host.left - 390)),
+      y: Math.max(8, last.top - host.top - 46),
+      imageBase64: snapshotSelection(rects, pages, pageRefs.current, zoom)
+    });
+  }
+
+  return (
+    <div className="pdf-reader">
+      <div className="pdf-controls">
+        <button className="icon-button" title="缩小" onClick={() => setZoom((value) => Math.max(0.55, value - 0.1))}><Minus size={15} /></button>
+        <span>{Math.round(zoom * 100)}%</span>
+        <button className="icon-button" title="放大" onClick={() => setZoom((value) => Math.min(4, value + 0.1))}><Plus size={15} /></button>
+      </div>
+      <div className="pdf-scroller" ref={scroller} onMouseUp={captureSelection}>
+        {pdf && pages.map((page, index) => (
+          <PDFPage
+            key={`${index}-${zoom}`}
+            page={page}
+            index={index}
+            zoom={zoom}
+            annotations={annotations.filter((annotation) => annotation.page === index + 1)}
+            bookmarked={bookmarkPage === index}
+            pageRef={(element) => {
+              if (element) pageRefs.current.set(index, element); else pageRefs.current.delete(index);
+            }}
+            onBookmark={() => onBookmark(index)}
+            onAnnotation={onAnnotation}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PDFPage({
+  page,
+  index,
+  zoom,
+  annotations,
+  bookmarked,
+  pageRef,
+  onBookmark,
+  onAnnotation
+}: {
+  page: PDFPageProxy;
+  index: number;
+  zoom: number;
+  annotations: KnowledgeAnnotation[];
+  bookmarked: boolean;
+  pageRef: (element: HTMLDivElement | null) => void;
+  onBookmark: () => void;
+  onAnnotation: (annotation: KnowledgeAnnotation) => void;
+}) {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const [textItems, setTextItems] = useState<Array<{ text: string; style: React.CSSProperties }>>([]);
+  const viewport = page.getViewport({ scale: zoom });
+
+  useEffect(() => {
+    const target = canvas.current;
+    if (!target) return;
+    const ratio = window.devicePixelRatio || 1;
+    target.width = Math.floor(viewport.width * ratio);
+    target.height = Math.floor(viewport.height * ratio);
+    target.style.width = `${viewport.width}px`;
+    target.style.height = `${viewport.height}px`;
+    const context = target.getContext("2d")!;
+    const render = page.render({ canvas: target, canvasContext: context, viewport, transform: ratio === 1 ? undefined : [ratio, 0, 0, ratio, 0, 0] });
+    page.getTextContent().then((content) => {
+      const items = content.items.flatMap((item) => {
+        if (!("str" in item)) return [];
+        const transform = pdfjs.Util.transform(viewport.transform, item.transform);
+        const fontHeight = Math.hypot(transform[2], transform[3]);
+        return [{
+          text: item.str,
+          style: {
+            left: transform[4],
+            top: transform[5] - fontHeight,
+            fontSize: fontHeight,
+            width: Math.max(1, item.width * zoom),
+            height: fontHeight,
+            transform: `scaleX(${item.width ? Math.max(0.2, (item.width * zoom) / Math.max(1, item.str.length * fontHeight * 0.5)) : 1})`,
+            transformOrigin: "left top"
+          }
+        }];
+      });
+      setTextItems(items);
+    });
+    return () => render.cancel();
+  }, [page, zoom]);
+
+  return (
+    <div
+      className="pdf-page"
+      data-page={index + 1}
+      ref={pageRef}
+      style={{ width: viewport.width, height: viewport.height }}
+    >
+      <canvas ref={canvas} />
+      <div className="pdf-text-layer">
+        {textItems.map((item, itemIndex) => <span key={itemIndex} style={item.style}>{item.text}</span>)}
+      </div>
+      <div className="pdf-annotation-layer">
+        {annotations.flatMap((annotation) => annotation.rects.map((rect, rectIndex) => {
+          const [x1, y1] = viewport.convertToViewportPoint(rect.x, rect.y);
+          const [x2, y2] = viewport.convertToViewportPoint(rect.x + rect.width, rect.y + rect.height);
+          const left = Math.min(x1, x2);
+          const top = Math.min(y1, y2);
+          const width = Math.abs(x2 - x1);
+          const height = Math.abs(y2 - y1);
+          return (
+            <div
+              key={`${annotation.id}-${rectIndex}`}
+              className={`pdf-annotation ${annotation.kind}`}
+              style={{ left, top, width, height }}
+            />
+          );
+        }))}
+        {annotations.filter((annotation) => annotation.note && annotation.rects.length).map((annotation) => {
+          const last = annotation.rects.at(-1)!;
+          const points = viewport.convertToViewportPoint(last.x + last.width, last.y);
+          return (
+            <button
+              key={`bubble-${annotation.id}`}
+              className="annotation-bubble"
+              style={{ top: Math.max(8, points[1] - 12), right: 8 }}
+              title={annotation.note}
+              onClick={() => onAnnotation(annotation)}
+            ><MessageSquareText size={15} /></button>
+          );
+        })}
+      </div>
+      <button className={`bookmark-ribbon ${bookmarked ? "active" : ""}`} title={bookmarked ? "取消本页书签" : "将本页设为书签"} onClick={onBookmark}><Bookmark size={17} /></button>
+    </div>
+  );
+}
+
+function snapshotSelection(
+  rects: AnnotationRect[],
+  pages: PDFPageProxy[],
+  pageElements: Map<number, HTMLDivElement>,
+  zoom: number
+): string | undefined {
+  const first = rects[0];
+  if (!first) return undefined;
+  const element = pageElements.get(first.page - 1);
+  const source = element?.querySelector("canvas");
+  const page = pages[first.page - 1];
+  if (!element || !source || !page) return undefined;
+  const viewport = page.getViewport({ scale: zoom });
+  const related = rects.filter((rect) => rect.page === first.page);
+  const boxes = related.map((rect) => {
+    const [x1, y1] = viewport.convertToViewportPoint(rect.x, rect.y);
+    const [x2, y2] = viewport.convertToViewportPoint(rect.x + rect.width, rect.y + rect.height);
+    return [x1, y1, x2, y2];
+  });
+  const padding = 18;
+  const left = Math.max(0, Math.min(...boxes.flatMap((box) => [box[0], box[2]])) - padding);
+  const top = Math.max(0, Math.min(...boxes.flatMap((box) => [box[1], box[3]])) - padding);
+  const right = Math.min(viewport.width, Math.max(...boxes.flatMap((box) => [box[0], box[2]])) + padding);
+  const bottom = Math.min(viewport.height, Math.max(...boxes.flatMap((box) => [box[1], box[3]])) + padding);
+  const ratio = source.width / viewport.width;
+  const output = window.document.createElement("canvas");
+  output.width = Math.max(1, Math.round((right - left) * ratio));
+  output.height = Math.max(1, Math.round((bottom - top) * ratio));
+  output.getContext("2d")?.drawImage(
+    source,
+    left * ratio,
+    top * ratio,
+    (right - left) * ratio,
+    (bottom - top) * ratio,
+    0,
+    0,
+    output.width,
+    output.height
+  );
+  return output.toDataURL("image/png").split(",")[1];
+}
