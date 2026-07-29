@@ -1130,13 +1130,13 @@ fn make_tree_read_only(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn make_read_only(path: &Path, directory: bool) -> Result<(), String> {
+fn make_read_only(path: &Path, _directory: bool) -> Result<(), String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(
             path,
-            fs::Permissions::from_mode(if directory { 0o555 } else { 0o444 }),
+            fs::Permissions::from_mode(if _directory { 0o555 } else { 0o444 }),
         )
         .map_err(error)?;
     }
@@ -1149,13 +1149,13 @@ fn make_read_only(path: &Path, directory: bool) -> Result<(), String> {
     Ok(())
 }
 
-fn make_writable(path: &Path, directory: bool) -> Result<(), String> {
+fn make_writable(path: &Path, _directory: bool) -> Result<(), String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(
             path,
-            fs::Permissions::from_mode(if directory { 0o755 } else { 0o644 }),
+            fs::Permissions::from_mode(if _directory { 0o755 } else { 0o644 }),
         )
         .map_err(error)?;
     }

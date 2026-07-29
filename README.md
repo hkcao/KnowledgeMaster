@@ -57,7 +57,7 @@
 | WebView | 系统 WebKit | WebView2 |
 | 凭据 | Keychain | Credential Manager |
 | Agent 终止 | 终止进程 | `taskkill /T` 终止进程树 |
-| 安装包 | `.app` / `.dmg` | `.msi` / NSIS |
+| 安装包 | `.app` / `.dmg` | NSIS `.exe` |
 
 共享技术栈：
 
@@ -86,7 +86,7 @@ npm run tauri dev
 npm run tauri build
 ```
 
-macOS 与 Windows 不能在本地互相交叉打包，因此仓库提供 `.github/workflows/tauri-ci.yml`，在两种系统上分别运行相同的前端测试、Rust 测试和安装包构建。
+macOS 与 Windows 不能在本地互相交叉打包，因此仓库提供 `.github/workflows/tauri-ci.yml`，在两种系统上分别运行相同的前端测试、Rust 测试，并验证 macOS `.app` 与 Windows NSIS `.exe` 构建。本地 macOS 仍可直接生成 `.dmg`。
 
 ## 本地资料结构
 
