@@ -540,6 +540,14 @@ pub fn move_document(
     save_data(&inner.root, &inner.data)
 }
 
+pub fn unlink_document(inner: &mut Inner, document_id: Uuid, topic_id: Uuid) -> Result<(), String> {
+    inner
+        .data
+        .document_topics
+        .retain(|item| !(item.document_id == document_id && item.topic_id == topic_id));
+    save_data(&inner.root, &inner.data)
+}
+
 pub fn search_documents(inner: &Inner, query: &str) -> Vec<Uuid> {
     let terms = query_terms(query);
     inner
@@ -600,46 +608,75 @@ pub fn recommend_topics(inner: &Inner, id: Uuid) -> Vec<TopicRecommendation> {
             ["软件开发", "编程", "api", "架构设计"].as_slice(),
         ),
     ];
-    rules
-        .into_iter()
-        .filter_map(|(name, keywords)| {
-            let matches: Vec<_> = keywords
-                .iter()
-                .filter(|word| material.contains(**word))
-                .take(3)
-                .copied()
-                .collect();
-            (!matches.is_empty()).then(|| TopicRecommendation {
-                name: name.into(),
-                reason: format!("命中：{}", matches.join("、")),
+    let mut scored: Vec<_> = inner
+        .data
+        .topics
+        .iter()
+        .filter_map(|topic| {
+            let topic_name = topic.name.to_lowercase();
+            let mut matched: Vec<String> = vec![];
+            let mut score = 0;
+            if material.contains(&topic_name) {
+                matched.push(topic.name.clone());
+                score += 6;
+            }
+            for (concept, keywords) in &rules {
+                let belongs = topic_name.contains(&concept.to_lowercase())
+                    || keywords.iter().any(|keyword| topic_name.contains(keyword));
+                if !belongs {
+                    continue;
+                }
+                for keyword in keywords
+                    .iter()
+                    .filter(|keyword| material.contains(**keyword))
+                    .take(3)
+                {
+                    if !matched.iter().any(|matched| matched == keyword) {
+                        matched.push((*keyword).to_string());
+                        score += 2;
+                    }
+                }
+            }
+            (score > 0).then(|| {
+                (
+                    score,
+                    TopicRecommendation {
+                        topic_id: topic.id,
+                        name: topic.name.clone(),
+                        reason: format!("本地匹配：{}", matched.join("、")),
+                        source: "local".into(),
+                    },
+                )
             })
         })
+        .collect();
+    scored.sort_by(|left, right| right.0.cmp(&left.0));
+    scored
+        .into_iter()
         .take(3)
+        .map(|(_, recommendation)| recommendation)
         .collect()
 }
 
 pub fn apply_recommendations(
     inner: &mut Inner,
     document_id: Uuid,
-    names: &[String],
+    topic_ids: &[Uuid],
 ) -> Result<(), String> {
-    for name in names {
-        let topic_id = inner
-            .data
-            .topics
-            .iter()
-            .find(|topic| topic.name.eq_ignore_ascii_case(name))
-            .map(|topic| topic.id)
-            .unwrap_or_else(|| {
-                let id = Uuid::new_v4();
-                inner.data.topics.push(Topic {
-                    id,
-                    name: name.clone(),
-                    parent_id: None,
-                    created_at: now(),
-                });
-                id
-            });
+    if !inner
+        .data
+        .documents
+        .iter()
+        .any(|document| document.id == document_id)
+    {
+        return Err("文档不存在".into());
+    }
+    let valid_topics: HashSet<_> = inner.data.topics.iter().map(|topic| topic.id).collect();
+    for topic_id in topic_ids
+        .iter()
+        .copied()
+        .filter(|topic_id| valid_topics.contains(topic_id))
+    {
         if !inner
             .data
             .document_topics
@@ -1072,5 +1109,38 @@ mod tests {
         let selected = root.join("source");
         assert_eq!(library_root_from_selection(&selected).unwrap(), root);
         assert_eq!(library_root_from_selection(&root).unwrap(), root);
+    }
+
+    #[test]
+    fn unlinking_document_keeps_other_virtual_topic_links() {
+        let root = std::env::temp_dir()
+            .join("KnowledgeMaster-tests")
+            .join(Uuid::new_v4().to_string());
+        let document_id = Uuid::new_v4();
+        let removed_topic = Uuid::new_v4();
+        let retained_topic = Uuid::new_v4();
+        let mut inner = Inner {
+            root: root.clone(),
+            data: KnowledgeData::default(),
+            settings: AppSettings::default(),
+        };
+        inner.data.document_topics = vec![
+            DocumentTopic {
+                document_id,
+                topic_id: removed_topic,
+                created_at: now(),
+            },
+            DocumentTopic {
+                document_id,
+                topic_id: retained_topic,
+                created_at: now(),
+            },
+        ];
+
+        unlink_document(&mut inner, document_id, removed_topic).unwrap();
+
+        assert_eq!(inner.data.document_topics.len(), 1);
+        assert_eq!(inner.data.document_topics[0].topic_id, retained_topic);
+        let _ = fs::remove_dir_all(root);
     }
 }

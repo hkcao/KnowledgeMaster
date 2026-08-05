@@ -25,6 +25,22 @@ export function resolveDocumentIDs(
   return [...values];
 }
 
+export function agentScopeSignature(
+  documentIds: Iterable<UUID>,
+  topicIds: Iterable<UUID>,
+  includeAnnotations: boolean
+): string {
+  const documents = [...new Set(documentIds)].sort().join(",");
+  const topics = [...new Set(topicIds)].sort().join(",");
+  return `documents:${documents}|topics:${topics}|annotations:${includeAnnotations}`;
+}
+
+export function clampChatPanelWidth(requested: number, viewportWidth: number): number {
+  const minimum = 240;
+  const maximum = Math.max(minimum, Math.min(720, viewportWidth - 660));
+  return Math.round(Math.min(Math.max(requested, minimum), maximum));
+}
+
 export function pendingSummaryMessages(conversation: Conversation): ChatMessage[] {
   const start = Math.min(Math.max(0, conversation.summaryMessageCount), conversation.messages.length);
   return conversation.messages.slice(start, start + 30);
@@ -57,6 +73,25 @@ export function formatBytes(value: number): string {
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
   if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`;
   return `${(value / 1024 / 1024 / 1024).toFixed(1)} GB`;
+}
+
+export function selectionToolbarPosition(
+  container: Pick<DOMRect, "left" | "top" | "width" | "height">,
+  selection: Pick<DOMRect, "left" | "right" | "top" | "bottom">,
+  toolbar = { width: 320, height: 42 }
+): { x: number; y: number } {
+  const margin = 8;
+  const gap = 8;
+  const right = selection.right - container.left + gap;
+  const left = selection.left - container.left - toolbar.width - gap;
+  const preferredX = right + toolbar.width <= container.width - margin ? right : left;
+  const above = selection.top - container.top - toolbar.height - gap;
+  const below = selection.bottom - container.top + gap;
+  const preferredY = above >= margin ? above : below;
+  return {
+    x: Math.min(Math.max(margin, preferredX), Math.max(margin, container.width - toolbar.width - margin)),
+    y: Math.min(Math.max(margin, preferredY), Math.max(margin, container.height - toolbar.height - margin))
+  };
 }
 
 export function escapeHTML(value: string): string {

@@ -383,8 +383,10 @@ pub struct ReaderDocumentPayload {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TopicRecommendation {
+    pub topic_id: Uuid,
     pub name: String,
     pub reason: String,
+    pub source: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

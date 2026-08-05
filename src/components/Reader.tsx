@@ -29,7 +29,7 @@ import type {
   ReaderQuote,
   UUID
 } from "../types";
-import { displayTitle, formatBytes } from "../utils";
+import { displayTitle, formatBytes, selectionToolbarPosition } from "../utils";
 import MarkdownView from "./MarkdownView";
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
@@ -216,7 +216,13 @@ export default function Reader({ document, data, focusedAnnotationId, layoutRevi
             />
           )}
           {selection && (
-            <div className="selection-toolbar" style={{ left: selection.x, top: selection.y }}>
+            <div
+              className="selection-toolbar"
+              role="toolbar"
+              aria-label="所选文字操作"
+              style={{ left: selection.x, top: selection.y }}
+              onPointerDown={(event) => event.stopPropagation()}
+            >
               <button onClick={askSelection}><Sparkles size={14} />Ask AI</button>
               <button onClick={askSelection}><Quote size={14} />引用</button>
               <i />
@@ -343,20 +349,27 @@ function TextReader({
   function handleSelection() {
     const selected = window.getSelection();
     const text = selected?.toString().trim() || "";
-    if (!text || !host.current || !selected?.rangeCount) return onSelection(null);
-    const rect = selected.getRangeAt(0).getBoundingClientRect();
-    const parent = host.current.closest(".document-viewport")!.getBoundingClientRect();
+    const root = content.current;
+    const viewport = host.current?.closest(".document-viewport");
+    if (!text || !root || !viewport || !selected?.rangeCount) return onSelection(null);
+    const range = selected.getRangeAt(0);
+    if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) return onSelection(null);
+    const rects = [...range.getClientRects()].filter((rect) => rect.width > 0 && rect.height > 0);
+    const rect = rects.at(-1);
+    if (!rect) return onSelection(null);
+    const parent = viewport.getBoundingClientRect();
+    const position = selectionToolbarPosition(parent, rect);
     onSelection({
       text,
       page: null,
       rects: [],
-      x: Math.min(parent.width - 430, Math.max(8, rect.right - parent.left - 390)),
-      y: Math.max(8, rect.top - parent.top - 46)
+      x: position.x,
+      y: position.y
     });
   }
 
   return (
-    <div className="text-reader" ref={host} onMouseUp={handleSelection}>
+    <div className="text-reader" ref={host} onPointerUp={() => window.requestAnimationFrame(handleSelection)}>
       <div ref={content}>
         {payload.kind === "html" ? (
           <div className="html-preview" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(payload.content, {
@@ -479,7 +492,12 @@ function PDFReader({
     const text = selected?.toString().trim() || "";
     if (!text || !selected?.rangeCount || !scroller.current) return onSelection(null);
     const range = selected.getRangeAt(0);
-    const clientRects = [...range.getClientRects()];
+    if (!scroller.current.contains(range.startContainer) || !scroller.current.contains(range.endContainer)) {
+      return onSelection(null);
+    }
+    const clientRects = [...range.getClientRects()].filter((rect) => rect.width > 0 && rect.height > 0);
+    const last = clientRects.at(-1);
+    if (!last) return onSelection(null);
     const rects: AnnotationRect[] = [];
     let targetPage: number | null = null;
     for (const [index, element] of pageRefs.current.entries()) {
@@ -498,14 +516,14 @@ function PDFReader({
         targetPage ??= index + 1;
       }
     }
-    const last = clientRects.at(-1)!;
     const host = scroller.current.getBoundingClientRect();
+    const position = selectionToolbarPosition(host, last);
     onSelection({
       text,
       page: targetPage,
       rects,
-      x: Math.min(host.width - 430, Math.max(8, last.right - host.left - 390)),
-      y: Math.max(8, last.top - host.top - 46),
+      x: position.x,
+      y: position.y,
       imageBase64: snapshotSelection(rects, pages, pageRefs.current, zoom)
     });
   }
@@ -517,7 +535,7 @@ function PDFReader({
         <span>{Math.round(zoom * 100)}%</span>
         <button className="icon-button" title="放大" onClick={() => setZoom((value) => Math.min(4, value + 0.1))}><Plus size={15} /></button>
       </div>
-      <div className="pdf-scroller" ref={scroller} onMouseUp={captureSelection}>
+      <div className="pdf-scroller" ref={scroller} onPointerUp={() => window.requestAnimationFrame(captureSelection)}>
         {pdf && pages.map((page, index) => (
           <PDFPage
             key={`${index}-${zoom}`}
@@ -558,12 +576,13 @@ function PDFPage({
   onAnnotation: (annotation: KnowledgeAnnotation) => void;
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
-  const [textItems, setTextItems] = useState<Array<{ text: string; style: React.CSSProperties }>>([]);
+  const textLayer = useRef<HTMLDivElement>(null);
   const viewport = page.getViewport({ scale: zoom });
 
   useEffect(() => {
     const target = canvas.current;
-    if (!target) return;
+    const textContainer = textLayer.current;
+    if (!target || !textContainer) return;
     const ratio = window.devicePixelRatio || 1;
     target.width = Math.floor(viewport.width * ratio);
     target.height = Math.floor(viewport.height * ratio);
@@ -571,27 +590,24 @@ function PDFPage({
     target.style.height = `${viewport.height}px`;
     const context = target.getContext("2d")!;
     const render = page.render({ canvas: target, canvasContext: context, viewport, transform: ratio === 1 ? undefined : [ratio, 0, 0, ratio, 0, 0] });
-    page.getTextContent().then((content) => {
-      const items = content.items.flatMap((item) => {
-        if (!("str" in item)) return [];
-        const transform = pdfjs.Util.transform(viewport.transform, item.transform);
-        const fontHeight = Math.hypot(transform[2], transform[3]);
-        return [{
-          text: item.str,
-          style: {
-            left: transform[4],
-            top: transform[5] - fontHeight,
-            fontSize: fontHeight,
-            width: Math.max(1, item.width * zoom),
-            height: fontHeight,
-            transform: `scaleX(${item.width ? Math.max(0.2, (item.width * zoom) / Math.max(1, item.str.length * fontHeight * 0.5)) : 1})`,
-            transformOrigin: "left top"
-          }
-        }];
-      });
-      setTextItems(items);
+    textContainer.replaceChildren();
+    textContainer.style.setProperty("--total-scale-factor", String(zoom));
+    const selectableText = new pdfjs.TextLayer({
+      textContentSource: page.streamTextContent({
+        includeMarkedContent: true,
+        disableNormalization: true
+      }),
+      container: textContainer,
+      viewport
     });
-    return () => render.cancel();
+    selectableText.render().catch((reason) => {
+      if (reason?.name !== "AbortException") console.error("PDF text layer failed:", reason);
+    });
+    return () => {
+      render.cancel();
+      selectableText.cancel();
+      textContainer.replaceChildren();
+    };
   }, [page, zoom]);
 
   return (
@@ -602,9 +618,7 @@ function PDFPage({
       style={{ width: viewport.width, height: viewport.height }}
     >
       <canvas ref={canvas} />
-      <div className="pdf-text-layer">
-        {textItems.map((item, itemIndex) => <span key={itemIndex} style={item.style}>{item.text}</span>)}
-      </div>
+      <div ref={textLayer} className="pdf-text-layer" />
       <div className="pdf-annotation-layer">
         {annotations.flatMap((annotation) => annotation.rects.map((rect, rectIndex) => {
           const [x1, y1] = viewport.convertToViewportPoint(rect.x, rect.y);

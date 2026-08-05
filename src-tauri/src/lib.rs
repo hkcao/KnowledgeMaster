@@ -12,7 +12,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
 };
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 use uuid::Uuid;
 
@@ -80,8 +80,14 @@ fn import_files(state: State<'_, AppState>, paths: Vec<String>) -> Result<Vec<St
 }
 
 #[tauri::command]
-async fn import_web_page(state: State<'_, AppState>, url: String) -> Result<Vec<String>, String> {
+async fn import_web_page(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    url: String,
+    import_id: String,
+) -> Result<Vec<String>, String> {
     let normalized = normalize_web_url(&url)?;
+    publish_web_import_progress(&app, &import_id, "connecting", "正在连接网页…");
     let response = reqwest::Client::new()
         .get(&normalized)
         .header(reqwest::header::USER_AGENT, "KnowledgeMaster/0.1")
@@ -91,28 +97,107 @@ async fn import_web_page(state: State<'_, AppState>, url: String) -> Result<Vec<
     if !response.status().is_success() {
         return Err(format!("网页返回 {}", response.status()));
     }
+    let download_detail = response
+        .content_length()
+        .map(|bytes| format!("正在下载文件（约 {:.1} MB）…", bytes as f64 / 1_048_576.0))
+        .unwrap_or_else(|| "正在下载文件…".into());
+    publish_web_import_progress(&app, &import_id, "downloading", &download_detail);
+    let final_url = response.url().clone();
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
     let bytes = response.bytes().await.map_err(error)?;
-    let host = reqwest::Url::parse(&normalized)
-        .map_err(error)?
-        .host_str()
-        .unwrap_or("web")
-        .replace(
-            |character: char| !(character.is_ascii_alphanumeric() || ".-".contains(character)),
-            "-",
-        );
+    publish_web_import_progress(&app, &import_id, "detecting", "正在识别文件格式…");
+    let is_pdf = downloaded_content_is_pdf(content_type.as_deref(), &bytes);
+    let host = final_url.host_str().unwrap_or("web").replace(
+        |character: char| !(character.is_ascii_alphanumeric() || ".-".contains(character)),
+        "-",
+    );
     let digest = {
         use sha2::{Digest, Sha256};
         format!("{:x}", Sha256::digest(normalized.as_bytes()))
     };
-    let temporary = std::env::temp_dir().join(format!("web-{}-{}.html", host, &digest[..10]));
-    fs::write(&temporary, bytes).map_err(error)?;
+    let file_name = if is_pdf {
+        web_pdf_filename(&final_url, &digest)
+    } else {
+        format!("web-{}-{}.html", host, &digest[..10])
+    };
+    let temporary_directory =
+        std::env::temp_dir().join(format!("knowledgemaster-web-{}", Uuid::new_v4()));
+    fs::create_dir_all(&temporary_directory).map_err(error)?;
+    let temporary = temporary_directory.join(file_name);
+    fs::write(&temporary, &bytes).map_err(error)?;
+    publish_web_import_progress(
+        &app,
+        &import_id,
+        "extracting",
+        if is_pdf {
+            "正在解析 PDF 并建立本地索引…"
+        } else {
+            "正在保存网页并建立本地索引…"
+        },
+    );
     let result = {
         let mut inner = state.inner.lock().map_err(error)?;
         vec![import_one(&mut inner, &temporary, Some(normalized.clone()))
             .unwrap_or_else(|value| format!("导入失败：{value}"))]
     };
-    let _ = fs::remove_file(temporary);
+    let _ = fs::remove_dir_all(temporary_directory);
+    publish_web_import_progress(&app, &import_id, "refreshing", "正在刷新知识目录…");
     Ok(result)
+}
+
+fn publish_web_import_progress(app: &AppHandle, import_id: &str, stage: &str, detail: &str) {
+    let _ = app.emit(
+        "web-import-progress",
+        serde_json::json!({
+            "importId": import_id,
+            "stage": stage,
+            "detail": detail
+        }),
+    );
+}
+
+fn downloaded_content_is_pdf(content_type: Option<&str>, bytes: &[u8]) -> bool {
+    let pdf_content_type = content_type
+        .and_then(|value| value.split(';').next())
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case("application/pdf"));
+    let prefix = &bytes[..bytes.len().min(1024)];
+    pdf_content_type || prefix.windows(5).any(|value| value == b"%PDF-")
+}
+
+fn web_pdf_filename(url: &reqwest::Url, digest: &str) -> String {
+    let raw = url
+        .path_segments()
+        .and_then(|segments| segments.filter(|value| !value.is_empty()).next_back())
+        .unwrap_or("");
+    let stem = if raw.to_ascii_lowercase().ends_with(".pdf") {
+        &raw[..raw.len() - 4]
+    } else {
+        raw
+    };
+    let sanitized: String = stem
+        .chars()
+        .map(|character| {
+            if character.is_alphanumeric() || ".-_".contains(character) {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let sanitized = sanitized.trim_matches(['.', '-', '_']);
+    let fallback = format!("document-{}", &digest[..10]);
+    format!(
+        "{}.pdf",
+        if sanitized.is_empty() {
+            &fallback
+        } else {
+            sanitized
+        }
+    )
 }
 
 fn normalize_web_url(value: &str) -> Result<String, String> {
@@ -211,6 +296,17 @@ fn move_document(
 }
 
 #[tauri::command]
+fn unlink_document(
+    state: State<'_, AppState>,
+    document_id: Uuid,
+    topic_id: Uuid,
+) -> Result<KnowledgeData, String> {
+    let mut inner = state.inner.lock().map_err(error)?;
+    store::unlink_document(&mut inner, document_id, topic_id)?;
+    Ok(inner.data.clone())
+}
+
+#[tauri::command]
 fn update_document_name(
     state: State<'_, AppState>,
     id: Uuid,
@@ -236,22 +332,48 @@ fn search_documents(state: State<'_, AppState>, query: String) -> Result<Vec<Uui
 }
 
 #[tauri::command]
-fn recommend_topics(
+async fn recommend_topics(
     state: State<'_, AppState>,
     id: Uuid,
 ) -> Result<Vec<TopicRecommendation>, String> {
-    let inner = state.inner.lock().map_err(error)?;
-    Ok(store::recommend_topics(&inner, id))
+    let inner = snapshot(&state)?;
+    let fallback = store::recommend_topics(&inner, id);
+    let document = inner
+        .data
+        .documents
+        .iter()
+        .find(|document| document.id == id)
+        .ok_or("文档不存在")?;
+    if inner.data.topics.is_empty() {
+        return Ok(vec![]);
+    }
+    let excerpt = store::read_extracted(&inner.root, id)
+        .text
+        .chars()
+        .take(6000)
+        .collect::<String>();
+    match ai::recommend_topics(
+        &state,
+        &inner.settings,
+        document.title(),
+        &excerpt,
+        &inner.data.topics,
+    )
+    .await
+    {
+        Ok(values) => Ok(values),
+        Err(_) => Ok(fallback),
+    }
 }
 
 #[tauri::command]
 fn apply_recommendations(
     state: State<'_, AppState>,
     document_id: Uuid,
-    names: Vec<String>,
+    topic_ids: Vec<Uuid>,
 ) -> Result<KnowledgeData, String> {
     let mut inner = state.inner.lock().map_err(error)?;
-    store::apply_recommendations(&mut inner, document_id, &names)?;
+    store::apply_recommendations(&mut inner, document_id, &topic_ids)?;
     Ok(inner.data.clone())
 }
 
@@ -585,6 +707,7 @@ pub fn run() {
             delete_topic,
             link_document,
             move_document,
+            unlink_document,
             update_document_name,
             search_documents,
             recommend_topics,
@@ -632,5 +755,27 @@ mod tests {
             "https://example.com/"
         );
         assert!(normalize_web_url("file:///tmp/a").is_err());
+    }
+
+    #[test]
+    fn web_download_detects_pdf_by_content_type_or_file_header() {
+        assert!(downloaded_content_is_pdf(
+            Some("application/pdf; charset=binary"),
+            b"response body"
+        ));
+        assert!(downloaded_content_is_pdf(
+            Some("application/octet-stream"),
+            b"\n%PDF-1.7\n"
+        ));
+        assert!(!downloaded_content_is_pdf(
+            Some("text/html"),
+            b"<!doctype html>"
+        ));
+    }
+
+    #[test]
+    fn arxiv_pdf_url_gets_a_pdf_filename_without_requiring_an_extension() {
+        let url = reqwest::Url::parse("https://arxiv.org/pdf/2607.24653").unwrap();
+        assert_eq!(web_pdf_filename(&url, "0123456789abcdef"), "2607.24653.pdf");
     }
 }

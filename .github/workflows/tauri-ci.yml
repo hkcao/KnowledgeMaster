@@ -3,6 +3,7 @@ name: Tauri desktop
 on:
   push:
     branches: [main, tauri-codex]
+    tags: ["v*"]
   pull_request:
 
 permissions:
@@ -36,3 +37,35 @@ jobs:
       - run: npm test
       - run: cargo test --manifest-path src-tauri/Cargo.toml
       - run: npm run tauri build -- --bundles ${{ matrix.bundle }}
+      - name: Prepare portable Windows executable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Copy-Item src-tauri/target/release/knowledge-master.exe KnowledgeMaster-portable.exe
+      - name: Upload Windows packages
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: KnowledgeMaster-Windows
+          if-no-files-found: error
+          path: |
+            KnowledgeMaster-portable.exe
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+
+  release-windows:
+    name: Publish Windows packages
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test-and-build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: KnowledgeMaster-Windows
+          path: release-artifacts
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes --title "$GITHUB_REF_NAME"
+          find release-artifacts -type f -print0 | xargs -0 gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber

@@ -170,8 +170,10 @@ export interface ReaderDocumentPayload {
 }
 
 export interface TopicRecommendation {
+  topicId: UUID;
   name: string;
   reason: string;
+  source: "ai" | "local";
 }
 
 export interface AgentRunResult {

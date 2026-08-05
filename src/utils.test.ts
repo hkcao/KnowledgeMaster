@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  agentScopeSignature,
+  clampChatPanelWidth,
   legacySelectionPrompt,
   newConversation,
   pendingSummaryMessages,
   resolveDocumentIDs,
+  selectionToolbarPosition,
   shouldSendOnReturn,
   visibleMessage
 } from "./utils";
@@ -35,11 +38,51 @@ describe("chat behavior", () => {
     );
   });
 
+  it("changes the agent scope when documents, topics, or annotations change", () => {
+    expect(agentScopeSignature(["b", "a"], ["topic"], true)).toBe(
+      agentScopeSignature(["a", "b"], ["topic"], true)
+    );
+    expect(agentScopeSignature(["a"], ["topic"], true)).not.toBe(
+      agentScopeSignature(["a"], ["other"], true)
+    );
+    expect(agentScopeSignature(["a"], [], true)).not.toBe(
+      agentScopeSignature(["a"], [], false)
+    );
+  });
+
+  it("keeps the right chat panel within readable layout limits", () => {
+    expect(clampChatPanelWidth(500, 1400)).toBe(500);
+    expect(clampChatPanelWidth(900, 1400)).toBe(720);
+    expect(clampChatPanelWidth(100, 900)).toBe(240);
+  });
+
   it("summarizes at most thirty unprocessed messages", () => {
     const conversation = newConversation();
     conversation.summaryMessageCount = 2;
     conversation.messages = Array.from({ length: 40 }, (_, index) => message(String(index)));
     expect(pendingSummaryMessages(conversation)).toHaveLength(30);
     expect(pendingSummaryMessages(conversation)[0].content).toBe("2");
+  });
+});
+
+describe("reader selection toolbar", () => {
+  const container = { left: 100, top: 50, width: 900, height: 700 };
+
+  it("opens beside and above the selected text when space is available", () => {
+    expect(selectionToolbarPosition(
+      container,
+      { left: 300, right: 420, top: 260, bottom: 280 }
+    )).toEqual({ x: 328, y: 160 });
+  });
+
+  it("moves inside the reader when the selection is near an edge", () => {
+    expect(selectionToolbarPosition(
+      container,
+      { left: 110, right: 160, top: 55, bottom: 75 }
+    )).toEqual({ x: 68, y: 33 });
+    expect(selectionToolbarPosition(
+      container,
+      { left: 930, right: 990, top: 260, bottom: 280 }
+    ).x).toBe(502);
   });
 });

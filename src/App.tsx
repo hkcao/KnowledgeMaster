@@ -7,7 +7,9 @@ import LibrarySidebar from "./components/LibrarySidebar";
 import Reader from "./components/Reader";
 import ChatPanel from "./components/ChatPanel";
 import SettingsModal from "./components/SettingsModal";
-import { displayTitle } from "./utils";
+import { clampChatPanelWidth, displayTitle } from "./utils";
+
+const CHAT_WIDTH_KEY = "knowledgemaster.rightChatWidth";
 
 export default function App() {
   const [state, setState] = useState<BootstrapState | null>(null);
@@ -19,10 +21,20 @@ export default function App() {
   const [lastChatPlacement, setLastChatPlacement] = useState<"right" | "bottom" | "sidebar">("right");
   const [layoutRevision, setLayoutRevision] = useState(0);
   const [externalRecommendationIds, setExternalRecommendationIds] = useState<UUID[]>([]);
+  const [rightChatWidth, setRightChatWidth] = useState(() => {
+    const saved = Number(window.localStorage.getItem(CHAT_WIDTH_KEY));
+    return clampChatPanelWidth(Number.isFinite(saved) && saved > 0 ? saved : 382, window.innerWidth);
+  });
   const [bootError, setBootError] = useState("");
 
   useEffect(() => {
     api.bootstrap().then(setState).catch((value) => setBootError(String(value)));
+  }, []);
+
+  useEffect(() => {
+    const fitChatPanel = () => setRightChatWidth((value) => clampChatPanelWidth(value, window.innerWidth));
+    window.addEventListener("resize", fitChatPanel);
+    return () => window.removeEventListener("resize", fitChatPanel);
   }, []);
 
   useEffect(() => {
@@ -79,6 +91,30 @@ export default function App() {
       if (currentId === id) setCurrentId(next[Math.min(Math.max(0, index), next.length - 1)]?.id || null);
       return next;
     });
+  }
+
+  function startRightChatResize(event: React.PointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    let latest = rightChatWidth;
+    const previousCursor = window.document.body.style.cursor;
+    const previousSelection = window.document.body.style.userSelect;
+    window.document.body.style.cursor = "col-resize";
+    window.document.body.style.userSelect = "none";
+    const move = (value: PointerEvent) => {
+      latest = clampChatPanelWidth(window.innerWidth - value.clientX, window.innerWidth);
+      setRightChatWidth(latest);
+    };
+    const stop = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      window.document.body.style.cursor = previousCursor;
+      window.document.body.style.userSelect = previousSelection;
+      window.localStorage.setItem(CHAT_WIDTH_KEY, String(latest));
+      setLayoutRevision((value) => value + 1);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop, { once: true });
   }
 
   if (!state) return <div className="boot-screen"><span className="brand-mark large">屿</span><strong>知屿</strong><span>{bootError || "正在打开知识库…"}</span></div>;
@@ -175,7 +211,16 @@ export default function App() {
           />
           {placement === "bottom" && <div className="bottom-chat">{chat}</div>}
         </div>
-        {placement === "right" && <div className="right-column">{chat}</div>}
+        {placement === "right" && <>
+          <div
+            className="right-chat-resizer"
+            role="separator"
+            aria-label="调整知识问答宽度"
+            aria-orientation="vertical"
+            onPointerDown={startRightChatResize}
+          />
+          <div className="right-column" style={{ flexBasis: rightChatWidth, width: rightChatWidth }}>{chat}</div>
+        </>}
       </div>
       {settingsOpen && <SettingsModal state={state} onState={setState} onClose={() => setSettingsOpen(false)} />}
     </div>

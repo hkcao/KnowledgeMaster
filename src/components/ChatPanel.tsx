@@ -32,10 +32,12 @@ import type {
   KnowledgeData,
   KnowledgeDocument,
   ReaderQuote,
+  Topic,
   TopicRecommendation,
   UUID
 } from "../types";
 import {
+  agentScopeSignature,
   displayTitle,
   newConversation,
   pendingSummaryMessages,
@@ -78,6 +80,7 @@ export default function ChatPanel(props: Props) {
     Array<{ document: KnowledgeDocument; values: TopicRecommendation[] }>
   >([]);
   const [importTopicSelection, setImportTopicSelection] = useState<Set<string>>(new Set());
+  const [classifyingImports, setClassifyingImports] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -156,7 +159,7 @@ export default function ChatPanel(props: Props) {
       } else {
         const nextRunId = crypto.randomUUID();
         setRunId(nextRunId);
-        const scopeSignature = [...documentIds].sort().join(",");
+        const scopeSignature = agentScopeSignature(documentIds, selectedTopics, includeAnnotations);
         const saved = base.agentSessions[settings.chatBackend];
         const sessionId = saved?.scopeSignature === scopeSignature && saved.messageCount === base.messages.length - 1 ? saved.id : null;
         const result = await api.runAgent({
@@ -319,6 +322,17 @@ export default function ChatPanel(props: Props) {
           </div>
         )}
         <small>{pureChat ? "纯聊天：本轮不会加载本地文档或批注；Agent 可按问题使用网页搜索。" : `已选择 ${selectedDocuments.size} 份文件、${selectedTopics.size} 个主题，将按授权范围查询。`}</small>
+        {selectedDocuments.size > 0 && (
+          <div className="selected-document-chips" aria-label="已选择的问答文档">
+            {data.documents.filter((document) => selectedDocuments.has(document.id)).map((document) => (
+              <button key={document.id} title={`移除 ${displayTitle(document)}`} onClick={() => {
+                const next = new Set(selectedDocuments);
+                next.delete(document.id);
+                setSelectedDocuments(next);
+              }}><FileText size={12} /><span>{displayTitle(document)}</span><X size={11} /></button>
+            ))}
+          </div>
+        )}
       </section>
 
       <div className="chat-messages" ref={scrollRef}>
@@ -398,37 +412,51 @@ export default function ChatPanel(props: Props) {
             const result = await api.importPending(chosen);
             onData(result.data);
             setPendingReview([]);
-            const groups = await Promise.all(
-              result.documentIds.map(async (id) => {
-                const document = result.data.documents.find((item) => item.id === id)!;
-                return { document, values: await api.recommendations(id) };
-              })
-            );
-            setImportRecommendations(groups);
-            setImportTopicSelection(
-              new Set(groups.flatMap(({ document, values }) => values.map((value) => `${document.id}:${value.name}`)))
-            );
+            setClassifyingImports(true);
+            try {
+              const groups = await Promise.all(
+                result.documentIds.map(async (id) => {
+                  const document = result.data.documents.find((item) => item.id === id)!;
+                  return { document, values: await api.recommendations(id) };
+                })
+              );
+              setImportRecommendations(groups);
+              setImportTopicSelection(
+                new Set(groups.flatMap(({ document, values }) => values.map((value) => `${document.id}:${value.topicId}`)))
+              );
+            } finally {
+              setClassifyingImports(false);
+            }
           }}
         />
       )}
       {importRecommendations.length > 0 && (
         <TopicConfirmation
           groups={importRecommendations}
+          topics={data.topics}
           selected={importTopicSelection}
           onSelected={setImportTopicSelection}
           onLater={() => setImportRecommendations([])}
           onApply={async () => {
             let next = data;
             for (const group of importRecommendations) {
-              const names = group.values
-                .filter((value) => importTopicSelection.has(`${group.document.id}:${value.name}`))
-                .map((value) => value.name);
-              next = await api.applyRecommendations(group.document.id, names);
+              const topicIds = data.topics
+                .filter((topic) => importTopicSelection.has(`${group.document.id}:${topic.id}`))
+                .map((topic) => topic.id);
+              next = await api.applyRecommendations(group.document.id, topicIds);
             }
             onData(next);
             setImportRecommendations([]);
           }}
         />
+      )}
+      {classifyingImports && (
+        <div className="modal-backdrop">
+          <section className="modal compact classification-progress">
+            <span className="spinner" />
+            <div><h2>正在分析主题</h2><p className="muted">使用当前配置的模型匹配已有目录；模型不可用时会自动切换为本地规则。</p></div>
+          </section>
+        </div>
       )}
     </aside>
   );
@@ -533,12 +561,14 @@ function PendingImportReview({
 
 function TopicConfirmation({
   groups,
+  topics,
   selected,
   onSelected,
   onLater,
   onApply
 }: {
   groups: Array<{ document: KnowledgeDocument; values: TopicRecommendation[] }>;
+  topics: Topic[];
   selected: Set<string>;
   onSelected: (value: Set<string>) => void;
   onLater: () => void;
@@ -548,15 +578,18 @@ function TopicConfirmation({
     <div className="modal-backdrop">
       <section className="modal recommendation-modal">
         <h2><Sparkles size={19} />确认下载资料的虚拟主题</h2>
-        <p className="muted">资料已安全导入，但只有你确认后才会建立主题关联。</p>
+        <p className="muted">模型推荐项已预先勾选。下面展示全部已有主题，你可以任意调整；只有确认后才会建立虚拟关联。</p>
         <div className="recommendation-list">
           {groups.map(({ document, values }) => (
             <div key={document.id} className="recommendation-document">
               <strong>{displayTitle(document)}</strong>
-              {values.length ? values.map((value) => {
-                const key = `${document.id}:${value.name}`;
+              {topics.length ? <div className="topic-choice-list">{[...topics]
+                .sort((left, right) => topicDisplayPath(topics, left).localeCompare(topicDisplayPath(topics, right), "zh-CN"))
+                .map((topic) => {
+                const value = values.find((recommendation) => recommendation.topicId === topic.id);
+                const key = `${document.id}:${topic.id}`;
                 return (
-                  <label key={key}>
+                  <label className={value ? "recommended" : ""} key={key}>
                     <input
                       type="checkbox"
                       checked={selected.has(key)}
@@ -566,10 +599,11 @@ function TopicConfirmation({
                         onSelected(next);
                       }}
                     />
-                    <span>{value.name}<small>{value.reason}</small></span>
+                    <span><strong>{topicDisplayPath(topics, topic)}</strong><small>{value?.reason || "可手动选择"}</small></span>
+                    {value && <em>{value.source === "ai" ? "AI 推荐" : "本地推荐"}</em>}
                   </label>
                 );
-              }) : <span className="muted">暂无可靠推荐，可保持未分类。</span>}
+              })}</div> : <span className="muted">还没有主题目录，可暂时保持未分类。</span>}
             </div>
           ))}
         </div>
@@ -580,4 +614,19 @@ function TopicConfirmation({
       </section>
     </div>
   );
+}
+
+function topicDisplayPath(topics: Topic[], topic: Topic): string {
+  const names = [topic.name];
+  let parentId = topic.parentId;
+  const visited = new Set<UUID>([topic.id]);
+  while (parentId) {
+    if (visited.has(parentId)) break;
+    visited.add(parentId);
+    const parent = topics.find((item) => item.id === parentId);
+    if (!parent) break;
+    names.unshift(parent.name);
+    parentId = parent.parentId;
+  }
+  return names.join(" / ");
 }

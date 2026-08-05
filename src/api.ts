@@ -23,7 +23,8 @@ export const api = {
     invoke<BootstrapState>("set_library_root", { path, migrate }),
   revealPath: () => invoke<void>("reveal_path"),
   importFiles: (paths: string[]) => invoke<string[]>("import_files", { paths }),
-  importWebPage: (url: string) => invoke<string[]>("import_web_page", { url }),
+  importWebPage: (url: string, importId: UUID) =>
+    invoke<string[]>("import_web_page", { url, importId }),
   deleteDocument: (id: UUID) => invoke<KnowledgeData>("delete_document", { id }),
   createTopic: (name: string, parentId?: UUID | null) =>
     invoke<KnowledgeData>("create_topic", { name, parentId: parentId ?? null }),
@@ -37,12 +38,14 @@ export const api = {
       sourceTopicId: sourceTopicId ?? null,
       targetTopicId: targetTopicId ?? null
     }),
+  unlinkDocument: (documentId: UUID, topicId: UUID) =>
+    invoke<KnowledgeData>("unlink_document", { documentId, topicId }),
   updateDocumentName: (id: UUID, displayName: string) =>
     invoke<KnowledgeData>("update_document_name", { id, displayName }),
   search: (query: string) => invoke<UUID[]>("search_documents", { query }),
   recommendations: (id: UUID) => invoke<TopicRecommendation[]>("recommend_topics", { id }),
-  applyRecommendations: (documentId: UUID, names: string[]) =>
-    invoke<KnowledgeData>("apply_recommendations", { documentId, names }),
+  applyRecommendations: (documentId: UUID, topicIds: UUID[]) =>
+    invoke<KnowledgeData>("apply_recommendations", { documentId, topicIds }),
   documentPayload: (id: UUID) => invoke<ReaderDocumentPayload>("document_payload", { id }),
   addAnnotation: (
     documentId: UUID,
