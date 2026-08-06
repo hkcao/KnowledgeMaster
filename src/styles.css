@@ -275,6 +275,7 @@ details > summary::-webkit-details-marker { display: none; }
 .empty-state span { max-width: 300px; font-size: 11px; }
 .empty-state.small { min-height: 90px; font-size: 11px; }
 .modal-backdrop { z-index: 1000; position: fixed; inset: 0; display: grid; place-items: center; background: rgba(20,38,49,.3); backdrop-filter: blur(5px); padding: 20px; }
+.web-import-backdrop { z-index: 2200; pointer-events: auto; isolation: isolate; }
 .modal { width: min(680px, 94vw); max-height: 90vh; overflow: auto; padding: 20px; border: 1px solid rgba(255,255,255,.75); border-radius: 9px; background: #f8fafb; box-shadow: 0 24px 70px rgba(20,38,49,.25); }
 .modal.compact { width: min(560px, 94vw); }
 .modal h2 { margin: 0 0 10px; display: flex; align-items: center; gap: 6px; font-size: 18px; }

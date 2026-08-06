@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
@@ -461,8 +462,8 @@ export default function LibrarySidebar(props: Props) {
         <span>{rootPath.includes("CloudDocs") ? "iCloud Drive" : "本地存储"}</span>
       </footer>
 
-      {webDialog && (
-        <div className="modal-backdrop">
+      {webDialog && createPortal(
+        <div className="modal-backdrop web-import-backdrop" onPointerDown={(event) => event.stopPropagation()}>
           <section className="modal compact">
             <h2>导入网页</h2>
             <p className="muted">普通网页将以 HTML 原文保存；链接实际返回 PDF 时会直接下载为 PDF。两种格式均可阅读、检索并用于 AI 问答。</p>
@@ -499,7 +500,8 @@ export default function LibrarySidebar(props: Props) {
               </button>
             </div>
           </section>
-        </div>
+        </div>,
+        window.document.body
       )}
 
       {recommendations.length > 0 && (
