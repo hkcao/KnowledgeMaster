@@ -7,7 +7,7 @@ import LibrarySidebar from "./components/LibrarySidebar";
 import Reader from "./components/Reader";
 import ChatPanel from "./components/ChatPanel";
 import SettingsModal from "./components/SettingsModal";
-import { clampChatPanelWidth, displayTitle } from "./utils";
+import { availableChatBackend, clampChatPanelWidth, displayTitle } from "./utils";
 
 const CHAT_WIDTH_KEY = "knowledgemaster.rightChatWidth";
 
@@ -28,7 +28,14 @@ export default function App() {
   const [bootError, setBootError] = useState("");
 
   useEffect(() => {
-    api.bootstrap().then(setState).catch((value) => setBootError(String(value)));
+    api.bootstrap().then((value) => {
+      const chatBackend = availableChatBackend(value.settings.chatBackend, value.agentAvailability);
+      const next = chatBackend === value.settings.chatBackend
+        ? value
+        : { ...value, settings: { ...value.settings, chatBackend } };
+      setState(next);
+      if (next !== value) void api.updateSettings(next.settings);
+    }).catch((value) => setBootError(String(value)));
   }, []);
 
   useEffect(() => {
@@ -126,6 +133,7 @@ export default function App() {
     <ChatPanel
       data={state.data}
       settings={settings}
+      agentAvailability={state.agentAvailability}
       currentDocument={currentDocument}
       quote={quote}
       onQuote={setQuote}

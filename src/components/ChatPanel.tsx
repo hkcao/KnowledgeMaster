@@ -50,6 +50,7 @@ import MarkdownView from "./MarkdownView";
 interface Props {
   data: KnowledgeData;
   settings: AppSettings;
+  agentAvailability: Record<"claudeCode" | "codex", string | null>;
   currentDocument?: KnowledgeDocument | null;
   quote?: ReaderQuote | null;
   onQuote: (quote: ReaderQuote | null) => void;
@@ -58,7 +59,7 @@ interface Props {
 }
 
 export default function ChatPanel(props: Props) {
-  const { data, settings, currentDocument, quote, onQuote, onData, onSettings } = props;
+  const { data, settings, agentAvailability, currentDocument, quote, onQuote, onData, onSettings } = props;
   const [conversation, setConversation] = useState(newConversation);
   const [draft, setDraft] = useState("");
   const [selectedDocuments, setSelectedDocuments] = useState<Set<UUID>>(new Set());
@@ -278,8 +279,8 @@ export default function ChatPanel(props: Props) {
             onChange={(event) => persistSettings({ ...settings, chatBackend: event.target.value as AppSettings["chatBackend"] })}
           >
             <option value="direct">直接 API</option>
-            <option value="claudeCode">Claude Code</option>
-            <option value="codex">Codex</option>
+            <option value="claudeCode" disabled={!agentAvailability.claudeCode}>Claude Code{agentAvailability.claudeCode ? "" : "（未检测到）"}</option>
+            <option value="codex" disabled={!agentAvailability.codex}>Codex{agentAvailability.codex ? "" : "（未检测到）"}</option>
           </select>
           {settings.chatBackend === "direct" && (
             <select

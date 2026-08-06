@@ -1,4 +1,4 @@
-import type { ChatMessage, Conversation, ReaderQuote, UUID } from "./types";
+import type { ChatBackend, ChatMessage, Conversation, ReaderQuote, UUID } from "./types";
 
 export const legacySelectionPrompt = "请结合上下文回答我关于这段内容的问题：";
 
@@ -11,6 +11,14 @@ export function visibleMessage(message: ChatMessage): string {
 
 export function shouldSendOnReturn(shiftPressed: boolean, isComposing: boolean): boolean {
   return !shiftPressed && !isComposing;
+}
+
+export function availableChatBackend(
+  preferred: ChatBackend,
+  availability: Record<"claudeCode" | "codex", string | null>
+): ChatBackend {
+  if (preferred === "direct") return preferred;
+  return availability[preferred] ? preferred : "direct";
 }
 
 export function resolveDocumentIDs(
@@ -39,6 +47,11 @@ export function clampChatPanelWidth(requested: number, viewportWidth: number): n
   const minimum = 240;
   const maximum = Math.max(minimum, Math.min(720, viewportWidth - 660));
   return Math.round(Math.min(Math.max(requested, minimum), maximum));
+}
+
+export function pdfOutputScale(devicePixelRatio: number, isWindows: boolean): number {
+  const safeRatio = Number.isFinite(devicePixelRatio) && devicePixelRatio > 0 ? devicePixelRatio : 1;
+  return Math.min(2, Math.max(safeRatio, isWindows ? 1.5 : 1));
 }
 
 export function pendingSummaryMessages(conversation: Conversation): ChatMessage[] {

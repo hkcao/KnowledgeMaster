@@ -156,9 +156,10 @@ details > summary::-webkit-details-marker { display: none; }
 
 .pdf-reader { width: 100%; height: 100%; position: relative; }
 .pdf-controls { z-index: 15; position: absolute; right: 14px; top: 10px; display: flex; align-items: center; gap: 2px; padding: 3px 5px; border: 1px solid rgba(196,205,210,.85); border-radius: 6px; background: rgba(255,255,255,.94); box-shadow: var(--shadow-soft); }
-.pdf-controls span { min-width: 40px; text-align: center; font-size: 10px; }
+.pdf-zoom-indicator { z-index: 16; position: absolute; left: 50%; top: 14px; transform: translateX(-50%); min-width: 58px; padding: 6px 10px; border-radius: 999px; background: rgba(26,39,46,.82); color: white; font-size: 12px; font-variant-numeric: tabular-nums; text-align: center; pointer-events: none; box-shadow: 0 4px 14px rgba(0,0,0,.2); }
 .pdf-scroller { width: 100%; height: 100%; overflow: auto; padding: 24px 42px 60px; overscroll-behavior: contain; }
 .pdf-page { position: relative; margin: 0 auto 20px; background: white; box-shadow: 0 2px 5px rgba(22,44,57,.14), 0 12px 32px rgba(22,44,57,.1); overflow: visible; }
+.pdf-page-content { position: absolute; left: 0; top: 0; overflow: hidden; transform-origin: 0 0; will-change: transform; }
 .pdf-page canvas { display: block; position: absolute; inset: 0; }
 .pdf-text-layer, .pdf-annotation-layer { position: absolute; inset: 0; overflow: hidden; }
 .pdf-text-layer {
@@ -213,18 +214,18 @@ details > summary::-webkit-details-marker { display: none; }
 .chat-header > span, .chat-header > div { display: flex; align-items: center; gap: 6px; }
 .placement-menu { position: relative; }
 .placement-menu summary { padding: 5px; display: grid; place-items: center; }
-.chat-scope { flex: 0 0 auto; padding: 8px 10px; background: #f1f5f6; border-bottom: 1px solid var(--border); font-size: 10px; }
+.chat-scope { flex: 0 0 auto; padding: 8px 10px; background: #f1f5f6; border-bottom: 1px solid var(--border); font-size: 12px; }
 .scope-head { display: flex; align-items: center; gap: 5px; }
-.scope-toggle { margin-right: auto; border: 0; padding: 4px; background: transparent; font-weight: 700; }
-.scope-head select { min-width: 0; max-width: 120px; padding: 4px 5px; font-size: 10px; }
+.scope-toggle { margin-right: auto; border: 0; padding: 4px; background: transparent; font-size: 12px; font-weight: 700; }
+.scope-head select { min-width: 0; max-width: 150px; padding: 4px 5px; font-size: 12px; }
 .scope-body { padding: 7px; display: grid; gap: 5px; background: var(--surface-muted); border-radius: 7px; }
 .scope-body > label { display: flex; align-items: center; gap: 5px; }
 .scope-body details { position: relative; }
 .scope-picker { max-height: 150px; overflow: auto; display: grid; gap: 3px; padding: 5px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }
 .scope-picker label { display: flex; align-items: center; gap: 4px; }
-.chat-scope > small { display: block; margin-top: 5px; font-size: 9px; }
+.chat-scope > small { display: block; margin-top: 5px; font-size: 11px; line-height: 1.4; }
 .selected-document-chips { display: flex; gap: 4px; margin-top: 7px; overflow-x: auto; scrollbar-width: thin; }
-.selected-document-chips button { flex: 0 0 auto; max-width: 210px; display: flex; align-items: center; gap: 4px; padding: 3px 6px; border-color: rgba(8,127,143,.22); border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 10px; }
+.selected-document-chips button { flex: 0 0 auto; max-width: 210px; display: flex; align-items: center; gap: 4px; padding: 3px 6px; border-color: rgba(8,127,143,.22); border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 12px; }
 .selected-document-chips button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-messages { min-height: 0; flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 15px 13px; display: flex; flex-direction: column; gap: 13px; }
 .message { max-width: 94%; display: grid; gap: 4px; align-self: flex-start; }

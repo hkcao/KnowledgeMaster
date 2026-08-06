@@ -73,7 +73,9 @@ export default function SettingsModal({
           <fieldset>
             <legend>聊天执行后端</legend>
             <label className="form-row"><span>默认回答方式</span><select value={settings.chatBackend} onChange={(event) => persist({ ...settings, chatBackend: event.target.value as ChatBackend })}>
-              <option value="direct">直接 API</option><option value="claudeCode">Claude Code</option><option value="codex">Codex</option>
+              <option value="direct">直接 API</option>
+              <option value="claudeCode" disabled={!state.agentAvailability.claudeCode}>Claude Code{state.agentAvailability.claudeCode ? "" : "（未检测到）"}</option>
+              <option value="codex" disabled={!state.agentAvailability.codex}>Codex{state.agentAvailability.codex ? "" : "（未检测到）"}</option>
             </select></label>
             {(["claudeCode", "codex"] as const).map((backend) => (
               <div className="agent-setting" key={backend}>

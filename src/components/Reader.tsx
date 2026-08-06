@@ -29,7 +29,7 @@ import type {
   ReaderQuote,
   UUID
 } from "../types";
-import { displayTitle, formatBytes, selectionToolbarPosition } from "../utils";
+import { displayTitle, formatBytes, pdfOutputScale, selectionToolbarPosition } from "../utils";
 import MarkdownView from "./MarkdownView";
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
@@ -422,8 +422,29 @@ function PDFReader({
   const [pdf, setPDF] = useState<PDFDocumentProxy | null>(null);
   const [pages, setPages] = useState<PDFPageProxy[]>([]);
   const [zoom, setZoom] = useState(1.2);
+  const [renderZoom, setRenderZoom] = useState(1.2);
+  const [showZoom, setShowZoom] = useState(false);
+  const zoomRef = useRef(1.2);
+  const renderTimer = useRef<number | null>(null);
+  const zoomLabelTimer = useRef<number | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const pageRefs = useRef(new Map<number, HTMLDivElement>());
+
+  useEffect(() => () => {
+    if (renderTimer.current) window.clearTimeout(renderTimer.current);
+    if (zoomLabelTimer.current) window.clearTimeout(zoomLabelTimer.current);
+  }, []);
+
+  function changeZoom(change: (current: number) => number) {
+    const next = Math.min(4, Math.max(0.55, change(zoomRef.current)));
+    zoomRef.current = next;
+    setZoom(next);
+    setShowZoom(true);
+    if (renderTimer.current) window.clearTimeout(renderTimer.current);
+    if (zoomLabelTimer.current) window.clearTimeout(zoomLabelTimer.current);
+    renderTimer.current = window.setTimeout(() => setRenderZoom(next), 160);
+    zoomLabelTimer.current = window.setTimeout(() => setShowZoom(false), 850);
+  }
 
   useEffect(() => {
     const bytes = Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
@@ -473,7 +494,7 @@ function PDFReader({
     );
     pageRefs.current.forEach((element) => observer.observe(element));
     return () => observer.disconnect();
-  }, [pages.length, zoom]);
+  }, [pages.length]);
 
   useEffect(() => {
     const target = scroller.current;
@@ -481,7 +502,7 @@ function PDFReader({
     const wheel = (event: WheelEvent) => {
       if (!event.ctrlKey) return;
       event.preventDefault();
-      setZoom((value) => Math.min(4, Math.max(0.55, value * (event.deltaY < 0 ? 1.08 : 0.92))));
+      changeZoom((value) => value * (event.deltaY < 0 ? 1.08 : 0.92));
     };
     target.addEventListener("wheel", wheel, { passive: false });
     return () => target.removeEventListener("wheel", wheel);
@@ -531,17 +552,18 @@ function PDFReader({
   return (
     <div className="pdf-reader">
       <div className="pdf-controls">
-        <button className="icon-button" title="缩小" onClick={() => setZoom((value) => Math.max(0.55, value - 0.1))}><Minus size={15} /></button>
-        <span>{Math.round(zoom * 100)}%</span>
-        <button className="icon-button" title="放大" onClick={() => setZoom((value) => Math.min(4, value + 0.1))}><Plus size={15} /></button>
+        <button className="icon-button" title="缩小" onClick={() => changeZoom((value) => value - 0.1)}><Minus size={15} /></button>
+        <button className="icon-button" title="放大" onClick={() => changeZoom((value) => value + 0.1)}><Plus size={15} /></button>
       </div>
+      {showZoom && <div className="pdf-zoom-indicator" role="status">{Math.round(zoom * 100)}%</div>}
       <div className="pdf-scroller" ref={scroller} onPointerUp={() => window.requestAnimationFrame(captureSelection)}>
         {pdf && pages.map((page, index) => (
           <PDFPage
-            key={`${index}-${zoom}`}
+            key={index}
             page={page}
             index={index}
-            zoom={zoom}
+            displayZoom={zoom}
+            renderZoom={renderZoom}
             annotations={annotations.filter((annotation) => annotation.page === index + 1)}
             bookmarked={bookmarkPage === index}
             pageRef={(element) => {
@@ -559,7 +581,8 @@ function PDFReader({
 function PDFPage({
   page,
   index,
-  zoom,
+  displayZoom,
+  renderZoom,
   annotations,
   bookmarked,
   pageRef,
@@ -568,7 +591,8 @@ function PDFPage({
 }: {
   page: PDFPageProxy;
   index: number;
-  zoom: number;
+  displayZoom: number;
+  renderZoom: number;
   annotations: KnowledgeAnnotation[];
   bookmarked: boolean;
   pageRef: (element: HTMLDivElement | null) => void;
@@ -577,28 +601,30 @@ function PDFPage({
 }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const textLayer = useRef<HTMLDivElement>(null);
-  const viewport = page.getViewport({ scale: zoom });
+  const displayViewport = page.getViewport({ scale: displayZoom });
+  const renderViewport = page.getViewport({ scale: renderZoom });
+  const transientScale = displayZoom / renderZoom;
 
   useEffect(() => {
     const target = canvas.current;
     const textContainer = textLayer.current;
     if (!target || !textContainer) return;
-    const ratio = window.devicePixelRatio || 1;
-    target.width = Math.floor(viewport.width * ratio);
-    target.height = Math.floor(viewport.height * ratio);
-    target.style.width = `${viewport.width}px`;
-    target.style.height = `${viewport.height}px`;
+    const ratio = pdfOutputScale(window.devicePixelRatio || 1, /Windows/i.test(navigator.userAgent));
+    target.width = Math.ceil(renderViewport.width * ratio);
+    target.height = Math.ceil(renderViewport.height * ratio);
+    target.style.width = `${renderViewport.width}px`;
+    target.style.height = `${renderViewport.height}px`;
     const context = target.getContext("2d")!;
-    const render = page.render({ canvas: target, canvasContext: context, viewport, transform: ratio === 1 ? undefined : [ratio, 0, 0, ratio, 0, 0] });
+    const render = page.render({ canvas: target, canvasContext: context, viewport: renderViewport, transform: ratio === 1 ? undefined : [ratio, 0, 0, ratio, 0, 0] });
     textContainer.replaceChildren();
-    textContainer.style.setProperty("--total-scale-factor", String(zoom));
+    textContainer.style.setProperty("--total-scale-factor", String(renderZoom));
     const selectableText = new pdfjs.TextLayer({
       textContentSource: page.streamTextContent({
         includeMarkedContent: true,
         disableNormalization: true
       }),
       container: textContainer,
-      viewport
+      viewport: renderViewport
     });
     selectableText.render().catch((reason) => {
       if (reason?.name !== "AbortException") console.error("PDF text layer failed:", reason);
@@ -608,21 +634,25 @@ function PDFPage({
       selectableText.cancel();
       textContainer.replaceChildren();
     };
-  }, [page, zoom]);
+  }, [page, renderZoom]);
 
   return (
     <div
       className="pdf-page"
       data-page={index + 1}
       ref={pageRef}
-      style={{ width: viewport.width, height: viewport.height }}
+      style={{ width: displayViewport.width, height: displayViewport.height }}
     >
-      <canvas ref={canvas} />
-      <div ref={textLayer} className="pdf-text-layer" />
-      <div className="pdf-annotation-layer">
+      <div
+        className="pdf-page-content"
+        style={{ width: renderViewport.width, height: renderViewport.height, transform: `scale(${transientScale})` }}
+      >
+        <canvas ref={canvas} />
+        <div ref={textLayer} className="pdf-text-layer" />
+        <div className="pdf-annotation-layer">
         {annotations.flatMap((annotation) => annotation.rects.map((rect, rectIndex) => {
-          const [x1, y1] = viewport.convertToViewportPoint(rect.x, rect.y);
-          const [x2, y2] = viewport.convertToViewportPoint(rect.x + rect.width, rect.y + rect.height);
+          const [x1, y1] = renderViewport.convertToViewportPoint(rect.x, rect.y);
+          const [x2, y2] = renderViewport.convertToViewportPoint(rect.x + rect.width, rect.y + rect.height);
           const left = Math.min(x1, x2);
           const top = Math.min(y1, y2);
           const width = Math.abs(x2 - x1);
@@ -637,7 +667,7 @@ function PDFPage({
         }))}
         {annotations.filter((annotation) => annotation.note && annotation.rects.length).map((annotation) => {
           const last = annotation.rects.at(-1)!;
-          const points = viewport.convertToViewportPoint(last.x + last.width, last.y);
+          const points = renderViewport.convertToViewportPoint(last.x + last.width, last.y);
           return (
             <button
               key={`bubble-${annotation.id}`}
@@ -648,6 +678,7 @@ function PDFPage({
             ><MessageSquareText size={15} /></button>
           );
         })}
+        </div>
       </div>
       <button className={`bookmark-ribbon ${bookmarked ? "active" : ""}`} title={bookmarked ? "取消本页书签" : "将本页设为书签"} onClick={onBookmark}><Bookmark size={17} /></button>
     </div>

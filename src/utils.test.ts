@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   agentScopeSignature,
+  availableChatBackend,
   clampChatPanelWidth,
   legacySelectionPrompt,
   newConversation,
   pendingSummaryMessages,
+  pdfOutputScale,
   resolveDocumentIDs,
   selectionToolbarPosition,
   shouldSendOnReturn,
@@ -25,6 +27,13 @@ describe("chat behavior", () => {
     expect(shouldSendOnReturn(false, false)).toBe(true);
     expect(shouldSendOnReturn(true, false)).toBe(false);
     expect(shouldSendOnReturn(false, true)).toBe(false);
+  });
+
+  it("falls back to direct API when a local agent is unavailable", () => {
+    const availability = { claudeCode: null, codex: "/usr/local/bin/codex" };
+    expect(availableChatBackend("claudeCode", availability)).toBe("direct");
+    expect(availableChatBackend("codex", availability)).toBe("codex");
+    expect(availableChatBackend("direct", availability)).toBe("direct");
   });
 
   it("keeps the internal selection prompt out of the visible bubble", () => {
@@ -54,6 +63,13 @@ describe("chat behavior", () => {
     expect(clampChatPanelWidth(500, 1400)).toBe(500);
     expect(clampChatPanelWidth(900, 1400)).toBe(720);
     expect(clampChatPanelWidth(100, 900)).toBe(240);
+  });
+
+  it("renders Windows PDFs above CSS resolution without exceeding 2x", () => {
+    expect(pdfOutputScale(1, true)).toBe(1.5);
+    expect(pdfOutputScale(1.25, true)).toBe(1.5);
+    expect(pdfOutputScale(2.5, true)).toBe(2);
+    expect(pdfOutputScale(1, false)).toBe(1);
   });
 
   it("summarizes at most thirty unprocessed messages", () => {
