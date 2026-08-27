@@ -656,7 +656,7 @@ function TopicNode(props: {
           }
         }}>
           <summary><MoreHorizontal size={15} /></summary>
-          <div className="popover-menu">
+          <div className="popover-menu right">
             <button onClick={() => { closeFolderMenus(); props.onAdd(topic.id); }}>新建子主题</button>
             <button onClick={() => { closeFolderMenus(); props.onRename(topic); }}>重命名</button>
             <button className="danger" onClick={() => { closeFolderMenus(); props.onDelete(topic); }}>删除</button>

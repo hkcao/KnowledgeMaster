@@ -3,6 +3,7 @@ import {
   agentScopeSignature,
   availableChatBackend,
   clampChatPanelWidth,
+  fitPDFScale,
   legacySelectionPrompt,
   newConversation,
   pendingSummaryMessages,
@@ -70,6 +71,12 @@ describe("chat behavior", () => {
     expect(pdfOutputScale(1.25, true)).toBe(1.5);
     expect(pdfOutputScale(2.5, true)).toBe(2);
     expect(pdfOutputScale(1, false)).toBe(1);
+  });
+
+  it("fits a PDF page to the full available reader width", () => {
+    expect(fitPDFScale(900, 600)).toBe(1.5);
+    expect(fitPDFScale(1200, 600)).toBe(2);
+    expect(fitPDFScale(100, 1000)).toBe(0.55);
   });
 
   it("summarizes at most thirty unprocessed messages", () => {

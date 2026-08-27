@@ -8,6 +8,7 @@ import {
   Download,
   Highlighter,
   ListTree,
+  Maximize2,
   MessageSquareText,
   Minus,
   Plus,
@@ -29,7 +30,7 @@ import type {
   ReaderQuote,
   UUID
 } from "../types";
-import { displayTitle, formatBytes, pdfOutputScale, selectionToolbarPosition } from "../utils";
+import { displayTitle, fitPDFScale, formatBytes, pdfOutputScale, selectionToolbarPosition } from "../utils";
 import MarkdownView from "./MarkdownView";
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
@@ -424,26 +425,53 @@ function PDFReader({
   const [zoom, setZoom] = useState(1.2);
   const [renderZoom, setRenderZoom] = useState(1.2);
   const [showZoom, setShowZoom] = useState(false);
+  const [fitMode, setFitMode] = useState(false);
+  const [renderedPages, setRenderedPages] = useState<Set<number>>(() => new Set([0, 1]));
   const zoomRef = useRef(1.2);
+  const fitModeRef = useRef(false);
+  const visiblePageRef = useRef(0);
+  const zoomFrame = useRef<number | null>(null);
   const renderTimer = useRef<number | null>(null);
   const zoomLabelTimer = useRef<number | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const pageRefs = useRef(new Map<number, HTMLDivElement>());
 
   useEffect(() => () => {
+    if (zoomFrame.current) window.cancelAnimationFrame(zoomFrame.current);
     if (renderTimer.current) window.clearTimeout(renderTimer.current);
     if (zoomLabelTimer.current) window.clearTimeout(zoomLabelTimer.current);
   }, []);
 
-  function changeZoom(change: (current: number) => number) {
-    const next = Math.min(4, Math.max(0.55, change(zoomRef.current)));
+  function applyZoom(nextValue: number, adaptive: boolean) {
+    const next = Math.min(4, Math.max(0.55, nextValue));
     zoomRef.current = next;
-    setZoom(next);
-    setShowZoom(true);
+    fitModeRef.current = adaptive;
+    setFitMode(adaptive);
+    if (zoomFrame.current == null) {
+      zoomFrame.current = window.requestAnimationFrame(() => {
+        setZoom(zoomRef.current);
+        setShowZoom(true);
+        zoomFrame.current = null;
+      });
+    }
     if (renderTimer.current) window.clearTimeout(renderTimer.current);
     if (zoomLabelTimer.current) window.clearTimeout(zoomLabelTimer.current);
-    renderTimer.current = window.setTimeout(() => setRenderZoom(next), 160);
+    renderTimer.current = window.setTimeout(() => setRenderZoom(zoomRef.current), 220);
     zoomLabelTimer.current = window.setTimeout(() => setShowZoom(false), 850);
+  }
+
+  function changeZoom(change: (current: number) => number) {
+    applyZoom(change(zoomRef.current), false);
+  }
+
+  function fitToArea() {
+    const target = scroller.current;
+    const page = pages[visiblePageRef.current] || pages[0];
+    if (!target || !page) return;
+    const style = window.getComputedStyle(target);
+    const availableWidth = target.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+    const viewport = page.getViewport({ scale: 1 });
+    applyZoom(fitPDFScale(availableWidth, viewport.width), true);
   }
 
   useEffect(() => {
@@ -453,6 +481,7 @@ function PDFReader({
       setPDF(value);
       const loaded = await Promise.all(Array.from({ length: value.numPages }, (_, index) => value.getPage(index + 1)));
       setPages(loaded);
+      setRenderedPages(new Set([0, 1].filter((index) => index < loaded.length)));
       const raw = await value.getOutline();
       const entries: OutlineEntry[] = [];
       async function walk(items: typeof raw, level: number) {
@@ -488,7 +517,10 @@ function PDFReader({
       (entries) => {
         const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
         const page = visible ? Number((visible.target as HTMLElement).dataset.page) - 1 : null;
-        if (page != null && page >= 0) onCurrentPage(page);
+        if (page != null && page >= 0) {
+          visiblePageRef.current = page;
+          onCurrentPage(page);
+        }
       },
       { root: target, threshold: [0.25, 0.5, 0.75] }
     );
@@ -499,10 +531,39 @@ function PDFReader({
   useEffect(() => {
     const target = scroller.current;
     if (!target) return;
+    const observer = new IntersectionObserver((entries) => {
+      setRenderedPages((current) => {
+        const next = new Set(current);
+        for (const entry of entries) {
+          const page = Number((entry.target as HTMLElement).dataset.page) - 1;
+          if (entry.isIntersecting) next.add(page); else next.delete(page);
+        }
+        if (next.size === current.size && [...next].every((page) => current.has(page))) return current;
+        return next;
+      });
+    }, { root: target, rootMargin: "900px 0px", threshold: 0 });
+    pageRefs.current.forEach((element) => observer.observe(element));
+    return () => observer.disconnect();
+  }, [pages.length]);
+
+  useEffect(() => {
+    const target = scroller.current;
+    if (!target || !pages.length) return;
+    const observer = new ResizeObserver(() => {
+      if (fitModeRef.current) fitToArea();
+    });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [pages]);
+
+  useEffect(() => {
+    const target = scroller.current;
+    if (!target) return;
     const wheel = (event: WheelEvent) => {
       if (!event.ctrlKey) return;
       event.preventDefault();
-      changeZoom((value) => value * (event.deltaY < 0 ? 1.08 : 0.92));
+      const delta = Math.max(-100, Math.min(100, event.deltaY));
+      changeZoom((value) => value * Math.exp(-delta * 0.0025));
     };
     target.addEventListener("wheel", wheel, { passive: false });
     return () => target.removeEventListener("wheel", wheel);
@@ -553,6 +614,7 @@ function PDFReader({
     <div className="pdf-reader">
       <div className="pdf-controls">
         <button className="icon-button" title="缩小" onClick={() => changeZoom((value) => value - 0.1)}><Minus size={15} /></button>
+        <button className={`icon-button pdf-fit-button ${fitMode ? "active" : ""}`} title="适合窗口宽度" onClick={fitToArea}><Maximize2 size={14} /><span>适合</span></button>
         <button className="icon-button" title="放大" onClick={() => changeZoom((value) => value + 0.1)}><Plus size={15} /></button>
       </div>
       {showZoom && <div className="pdf-zoom-indicator" role="status">{Math.round(zoom * 100)}%</div>}
@@ -564,6 +626,7 @@ function PDFReader({
             index={index}
             displayZoom={zoom}
             renderZoom={renderZoom}
+            active={renderedPages.has(index)}
             annotations={annotations.filter((annotation) => annotation.page === index + 1)}
             bookmarked={bookmarkPage === index}
             pageRef={(element) => {
@@ -583,6 +646,7 @@ function PDFPage({
   index,
   displayZoom,
   renderZoom,
+  active,
   annotations,
   bookmarked,
   pageRef,
@@ -593,6 +657,7 @@ function PDFPage({
   index: number;
   displayZoom: number;
   renderZoom: number;
+  active: boolean;
   annotations: KnowledgeAnnotation[];
   bookmarked: boolean;
   pageRef: (element: HTMLDivElement | null) => void;
@@ -606,6 +671,7 @@ function PDFPage({
   const transientScale = displayZoom / renderZoom;
 
   useEffect(() => {
+    if (!active) return;
     const target = canvas.current;
     const textContainer = textLayer.current;
     if (!target || !textContainer) return;
@@ -634,7 +700,7 @@ function PDFPage({
       selectableText.cancel();
       textContainer.replaceChildren();
     };
-  }, [page, renderZoom]);
+  }, [active, page, renderZoom]);
 
   return (
     <div
@@ -643,8 +709,8 @@ function PDFPage({
       ref={pageRef}
       style={{ width: displayViewport.width, height: displayViewport.height }}
     >
-      <div
-        className="pdf-page-content"
+      {active && <div
+        className={`pdf-page-content ${transientScale === 1 ? "" : "zooming"}`}
         style={{ width: renderViewport.width, height: renderViewport.height, transform: `scale(${transientScale})` }}
       >
         <canvas ref={canvas} />
@@ -679,7 +745,7 @@ function PDFPage({
           );
         })}
         </div>
-      </div>
+      </div>}
       <button className={`bookmark-ribbon ${bookmarked ? "active" : ""}`} title={bookmarked ? "取消本页书签" : "将本页设为书签"} onClick={onBookmark}><Bookmark size={17} /></button>
     </div>
   );

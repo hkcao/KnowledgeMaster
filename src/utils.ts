@@ -54,6 +54,14 @@ export function pdfOutputScale(devicePixelRatio: number, isWindows: boolean): nu
   return Math.min(2, Math.max(safeRatio, isWindows ? 1.5 : 1));
 }
 
+export function fitPDFScale(
+  availableWidth: number,
+  pageWidth: number
+): number {
+  if (availableWidth <= 0 || pageWidth <= 0) return 1;
+  return Math.min(4, Math.max(0.55, availableWidth / pageWidth));
+}
+
 export function pendingSummaryMessages(conversation: Conversation): ChatMessage[] {
   const start = Math.min(Math.max(0, conversation.summaryMessageCount), conversation.messages.length);
   return conversation.messages.slice(start, start + 30);

@@ -1,6 +1,6 @@
 [package]
 name = "knowledge-master"
-version = "0.2.1"
+version = "0.2.2"
 description = "知屿 KnowledgeMaster - local-first research knowledge workspace"
 authors = ["KnowledgeMaster Contributors"]
 edition = "2021"
