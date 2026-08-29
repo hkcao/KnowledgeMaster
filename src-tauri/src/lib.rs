@@ -43,6 +43,9 @@ fn reload_library(state: State<'_, AppState>) -> Result<KnowledgeData, String> {
     inner.data = store::load_data(&inner.root)?;
     let root = inner.root.clone();
     store::migrate_notes(&root, &mut inner.data)?;
+    if store::migrate_document_filenames(&root, &mut inner.data)? {
+        store::save_data(&root, &inner.data)?;
+    }
     Ok(inner.data.clone())
 }
 
@@ -313,14 +316,18 @@ fn update_document_name(
     display_name: String,
 ) -> Result<KnowledgeData, String> {
     let mut inner = state.inner.lock().map_err(error)?;
-    let document = inner
-        .data
-        .documents
-        .iter_mut()
-        .find(|document| document.id == id)
-        .ok_or("文档不存在")?;
-    document.display_name =
-        (!display_name.trim().is_empty()).then(|| display_name.trim().to_string());
+    {
+        let document = inner
+            .data
+            .documents
+            .iter_mut()
+            .find(|document| document.id == id)
+            .ok_or("文档不存在")?;
+        document.display_name =
+            (!display_name.trim().is_empty()).then(|| display_name.trim().to_string());
+    }
+    let root = inner.root.clone();
+    store::migrate_document_filenames(&root, &mut inner.data)?;
     save_data(&inner.root, &inner.data)?;
     Ok(inner.data.clone())
 }

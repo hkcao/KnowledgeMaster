@@ -260,6 +260,7 @@ pub async fn direct_chat(
             question,
             quote.map(|value| value.text.as_str()).unwrap_or("")
         ),
+        quote.map(|value| value.text.as_str()),
         document_ids,
         topic_ids,
     );

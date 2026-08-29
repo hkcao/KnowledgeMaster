@@ -83,6 +83,8 @@ details > summary::-webkit-details-marker { display: none; }
 .import-actions button { flex: 1; }
 .import-actions button.primary { flex: 1.35; }
 .tree-title { height: 34px; display: flex; align-items: center; justify-content: space-between; padding: 4px 10px 0 13px; color: var(--text-muted); font-size: 10px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+.tree-title-actions { display: flex; align-items: center; gap: 1px; }
+.tree-title-actions .spinning { animation: spin .8s linear infinite; }
 .tree-scroll, .notes-scroll { min-height: 0; flex: 1; overflow: auto; padding: 3px 7px 10px; }
 .tree-group { width: 100%; }
 .tree-children { margin-left: 15px; border-left: 1px solid #dfe6e9; padding-left: 3px; }

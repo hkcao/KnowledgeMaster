@@ -15,6 +15,7 @@ import {
   GripVertical,
   Globe2,
   MoreHorizontal,
+  RefreshCw,
   Search,
   Settings,
   Sparkles
@@ -122,6 +123,7 @@ export default function LibrarySidebar(props: Props) {
   const [webImportProgress, setWebImportProgress] = useState<WebImportProgress | null>(null);
   const [webImportElapsed, setWebImportElapsed] = useState(0);
   const [webImportError, setWebImportError] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     const timer = window.setTimeout(async () => {
@@ -206,6 +208,19 @@ export default function LibrarySidebar(props: Props) {
   async function pickFolder() {
     const selected = await open({ directory: true, multiple: false });
     if (selected) await importPaths([selected]);
+  }
+
+  async function refreshDirectory() {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await onReload();
+      setMessage("目录已刷新");
+    } catch (error) {
+      setMessage(`刷新失败：${String(error)}`);
+    } finally {
+      setRefreshing(false);
+    }
   }
 
   async function importWeb() {
@@ -378,7 +393,12 @@ export default function LibrarySidebar(props: Props) {
           </div>
           <div className="tree-title">
             <span>知识目录</span>
-            <button className="icon-button" title="新建主题" onClick={() => addTopic()}><FolderPlus size={16} /></button>
+            <div className="tree-title-actions">
+              <button className="icon-button" title="刷新目录" aria-label="刷新目录" disabled={refreshing} onClick={() => void refreshDirectory()}>
+                <RefreshCw className={refreshing ? "spinning" : ""} size={15} />
+              </button>
+              <button className="icon-button" title="新建主题" onClick={() => addTopic()}><FolderPlus size={16} /></button>
+            </div>
           </div>
           <div className="tree-scroll">
             {roots.map((topic) => (

@@ -1,6 +1,7 @@
 use crate::models::*;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
@@ -14,6 +15,31 @@ use walkdir::WalkDir;
 
 pub const SUPPORTED_EXTENSIONS: &[&str] =
     &["pdf", "html", "htm", "md", "markdown", "txt", "doc", "docx"];
+const CHUNK_CACHE_VERSION: usize = 1;
+const DEFAULT_CHUNK_TOKENS: usize = 256;
+const DEFAULT_CHUNK_OVERLAP: usize = 48;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ChunkCache {
+    version: usize,
+    document_id: Uuid,
+    source_sha256: String,
+    target_tokens: usize,
+    overlap_tokens: usize,
+    chunks: Vec<CachedChunk>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CachedChunk {
+    index: usize,
+    page: Option<usize>,
+    start: usize,
+    end: usize,
+    approximate_tokens: usize,
+    text: String,
+}
 
 #[derive(Clone)]
 pub struct Inner {
@@ -36,6 +62,7 @@ impl AppState {
         prepare_directories(&root)?;
         let mut data = load_data(&root)?;
         migrate_notes(&root, &mut data)?;
+        migrate_document_filenames(&root, &mut data)?;
         save_data(&root, &data)?;
         Ok(Self {
             inner: Mutex::new(Inner {
@@ -131,6 +158,9 @@ pub fn notes_dir(root: &Path) -> PathBuf {
 pub fn cache_dir(root: &Path) -> PathBuf {
     source_dir(root).join("generated").join("agent-cache")
 }
+pub fn chunks_dir(root: &Path) -> PathBuf {
+    source_dir(root).join("generated").join("chunks")
+}
 pub fn pending_dir(root: &Path) -> PathBuf {
     source_dir(root).join("downloads").join("pending")
 }
@@ -145,6 +175,7 @@ pub fn prepare_directories(root: &Path) -> Result<(), String> {
         pending_dir(root),
         source_dir(root).join("generated"),
         cache_dir(root),
+        chunks_dir(root),
     ] {
         fs::create_dir_all(path).map_err(error)?;
     }
@@ -203,6 +234,7 @@ pub fn switch_root(inner: &mut Inner, target: PathBuf, migrate: bool) -> Result<
     inner.root = target;
     inner.data = load_data(&inner.root)?;
     migrate_notes(&inner.root, &mut inner.data)?;
+    migrate_document_filenames(&inner.root, &mut inner.data)?;
     save_root_preference(&inner.root)?;
     save_data(&inner.root, &inner.data)
 }
@@ -308,6 +340,146 @@ pub fn read_extracted(root: &Path, id: Uuid) -> ExtractedDocument {
         .unwrap_or_default()
 }
 
+fn chunk_cache_path(root: &Path, id: Uuid) -> PathBuf {
+    chunks_dir(root).join(format!("{id}.json"))
+}
+
+fn approximate_token_units(character: char) -> usize {
+    if character.is_ascii() {
+        1
+    } else {
+        4
+    }
+}
+
+fn approximate_tokens(text: &str) -> usize {
+    text.chars()
+        .map(approximate_token_units)
+        .sum::<usize>()
+        .div_ceil(4)
+}
+
+fn chunk_ranges(text: &str, target_tokens: usize, overlap_tokens: usize) -> Vec<(usize, usize)> {
+    let characters: Vec<char> = text.chars().collect();
+    if characters.is_empty() {
+        return vec![];
+    }
+    let target_units = target_tokens.max(1) * 4;
+    let overlap_units = overlap_tokens.min(target_tokens.saturating_sub(1)) * 4;
+    let mut ranges = vec![];
+    let mut start = 0;
+    while start < characters.len() {
+        let mut end = start;
+        let mut units = 0;
+        while end < characters.len() && units < target_units {
+            units += approximate_token_units(characters[end]);
+            end += 1;
+        }
+        if end < characters.len() {
+            let minimum = start + (end - start) * 3 / 4;
+            if let Some(boundary) = (minimum..end).rev().find(|index| {
+                matches!(
+                    characters[*index],
+                    '\n' | '。' | '！' | '？' | '.' | '!' | '?' | ';' | '；'
+                )
+            }) {
+                end = boundary + 1;
+            }
+        }
+        if end <= start {
+            end = (start + 1).min(characters.len());
+        }
+        ranges.push((start, end));
+        if end == characters.len() {
+            break;
+        }
+        let mut next = end;
+        let mut overlap = 0;
+        while next > start && overlap < overlap_units {
+            next -= 1;
+            overlap += approximate_token_units(characters[next]);
+        }
+        start = next.max(start + 1);
+    }
+    ranges
+}
+
+fn build_chunk_cache(document: &KnowledgeDocument, extracted: &ExtractedDocument) -> ChunkCache {
+    let sources: Vec<(Option<usize>, &str)> = if extracted.pages.is_empty() {
+        vec![(None, extracted.text.as_str())]
+    } else {
+        extracted
+            .pages
+            .iter()
+            .map(|page| (Some(page.number), page.text.as_str()))
+            .collect()
+    };
+    let mut chunks = vec![];
+    for (page, text) in sources {
+        let characters: Vec<char> = text.chars().collect();
+        for (start, end) in chunk_ranges(text, DEFAULT_CHUNK_TOKENS, DEFAULT_CHUNK_OVERLAP) {
+            let value: String = characters[start..end].iter().collect();
+            chunks.push(CachedChunk {
+                index: chunks.len(),
+                page,
+                start,
+                end,
+                approximate_tokens: approximate_tokens(&value),
+                text: value,
+            });
+        }
+    }
+    ChunkCache {
+        version: CHUNK_CACHE_VERSION,
+        document_id: document.id,
+        source_sha256: document.sha256.clone(),
+        target_tokens: DEFAULT_CHUNK_TOKENS,
+        overlap_tokens: DEFAULT_CHUNK_OVERLAP,
+        chunks,
+    }
+}
+
+fn write_chunk_cache(
+    root: &Path,
+    document: &KnowledgeDocument,
+    extracted: &ExtractedDocument,
+) -> Result<(), String> {
+    fs::create_dir_all(chunks_dir(root)).map_err(error)?;
+    let cache = build_chunk_cache(document, extracted);
+    fs::write(
+        chunk_cache_path(root, document.id),
+        serde_json::to_vec_pretty(&cache).map_err(error)?,
+    )
+    .map_err(error)
+}
+
+fn read_or_build_chunk_cache(
+    root: &Path,
+    document: &KnowledgeDocument,
+    extracted: &ExtractedDocument,
+) -> ChunkCache {
+    let path = chunk_cache_path(root, document.id);
+    if let Ok(bytes) = fs::read(&path) {
+        if let Ok(cache) = serde_json::from_slice::<ChunkCache>(&bytes) {
+            if cache.version == CHUNK_CACHE_VERSION
+                && cache.document_id == document.id
+                && cache.source_sha256 == document.sha256
+                && cache.target_tokens == DEFAULT_CHUNK_TOKENS
+                && cache.overlap_tokens == DEFAULT_CHUNK_OVERLAP
+            {
+                return cache;
+            }
+        }
+    }
+    let cache = build_chunk_cache(document, extracted);
+    if fs::create_dir_all(chunks_dir(root)).is_ok() {
+        if let Ok(bytes) = serde_json::to_vec_pretty(&cache) {
+            let _ = fs::write(path, bytes);
+        }
+    }
+    cache
+}
+
 pub fn import_paths(inner: &mut Inner, paths: &[String]) -> Vec<String> {
     let mut files = vec![];
     for raw in paths {
@@ -368,23 +540,7 @@ pub fn import_one(
         return Ok(format!("内容重复：{name}"));
     }
     let id = Uuid::new_v4();
-    let stored_name = flat_stored_filename(id, &name);
-    let relative = format!("source/documents/{stored_name}");
-    let destination = inner.root.join(&relative);
-    fs::copy(path, &destination).map_err(error)?;
-    let extracted = match extract_path(&destination) {
-        Ok(value) => value,
-        Err(value) => {
-            let _ = fs::remove_file(&destination);
-            return Err(value);
-        }
-    };
-    fs::write(
-        index_dir(&inner.root).join(format!("{id}.json")),
-        serde_json::to_vec_pretty(&extracted).map_err(error)?,
-    )
-    .map_err(error)?;
-    let size = bytes.len() as i64;
+    let extracted = extract_path(path)?;
     let display_name = if extension == "pdf" {
         paper_display_name(&extracted)
     } else if matches!(extension.as_str(), "html" | "htm") {
@@ -392,12 +548,25 @@ pub fn import_one(
     } else {
         None
     };
-    inner.data.documents.push(KnowledgeDocument {
+    let recognizable_name = recognizable_document_name(&name, display_name.as_deref(), &extension);
+    let stored_name = flat_stored_filename(id, &recognizable_name);
+    let relative = format!("source/documents/{stored_name}");
+    let destination = inner.root.join(&relative);
+    fs::copy(path, &destination).map_err(error)?;
+    let index_path = index_dir(&inner.root).join(format!("{id}.json"));
+    if let Err(value) = fs::write(
+        &index_path,
+        serde_json::to_vec_pretty(&extracted).map_err(error)?,
+    ) {
+        let _ = fs::remove_file(&destination);
+        return Err(error(value));
+    }
+    let document = KnowledgeDocument {
         id,
         name: name.clone(),
         display_name,
         extension_name: format!(".{extension}"),
-        size,
+        size: bytes.len() as i64,
         sha256: digest,
         stored_path: Some(relative),
         imported_at: now(),
@@ -405,7 +574,13 @@ pub fn import_one(
         page_count: (!extracted.pages.is_empty()).then_some(extracted.pages.len()),
         error: None,
         source_url,
-    });
+    };
+    if let Err(value) = write_chunk_cache(&inner.root, &document, &extracted) {
+        let _ = fs::remove_file(&destination);
+        let _ = fs::remove_file(&index_path);
+        return Err(value);
+    }
+    inner.data.documents.push(document);
     save_data(&inner.root, &inner.data)?;
     Ok(format!("已导入：{name}"))
 }
@@ -420,6 +595,7 @@ pub fn delete_document(inner: &mut Inner, id: Uuid) -> Result<(), String> {
         let _ = fs::remove_file(stored_path(&inner.root, document)?);
     }
     let _ = fs::remove_file(index_dir(&inner.root).join(format!("{id}.json")));
+    let _ = fs::remove_file(chunk_cache_path(&inner.root, id));
     inner.data.documents.retain(|document| document.id != id);
     inner
         .data
@@ -819,6 +995,7 @@ pub fn selected_document_ids(
 pub fn context_chunks(
     inner: &Inner,
     query: &str,
+    quote: Option<&str>,
     document_ids: &[Uuid],
     topic_ids: &[Uuid],
 ) -> Vec<ContextChunk> {
@@ -829,28 +1006,46 @@ pub fn context_chunks(
         .iter()
         .filter(|document| selected.contains(&document.id))
         .collect();
-    let mut ranked: Vec<(i32, &KnowledgeDocument, Option<usize>, String)> = vec![];
+    let normalized_quote = quote
+        .map(normalize_whitespace)
+        .map(|value| value.to_lowercase())
+        .filter(|value| !value.is_empty());
+    let mut ranked: Vec<(i32, bool, &KnowledgeDocument, CachedChunk)> = vec![];
     for document in &documents {
         let extracted = read_extracted(&inner.root, document.id);
-        if extracted.pages.is_empty() {
-            for chunk in chunks(&extracted.text, 1400, 180) {
+        let cache = read_or_build_chunk_cache(&inner.root, document, &extracted);
+        for chunk in cache.chunks {
+            let exact = normalized_quote.as_ref().is_some_and(|quote| {
+                normalize_whitespace(&chunk.text)
+                    .to_lowercase()
+                    .contains(quote)
+            });
+            ranked.push((
+                score(query, &chunk.text, document.title()) + if exact { 1000 } else { 0 },
+                exact,
+                document,
+                chunk,
+            ));
+        }
+        if normalized_quote.is_some()
+            && !ranked.iter().any(|item| item.1 && item.2.id == document.id)
+        {
+            if let Some((page, text)) =
+                full_parsed_quote_context(&extracted, quote.unwrap_or_default())
+            {
                 ranked.push((
-                    score(query, &chunk, document.title()),
+                    score(query, &text, document.title()) + 1000,
+                    true,
                     document,
-                    None,
-                    chunk,
+                    CachedChunk {
+                        index: usize::MAX,
+                        page,
+                        start: 0,
+                        end: text.chars().count(),
+                        approximate_tokens: approximate_tokens(&text),
+                        text,
+                    },
                 ));
-            }
-        } else {
-            for page in extracted.pages {
-                for chunk in chunks(&page.text, 1400, 180) {
-                    ranked.push((
-                        score(query, &chunk, document.title()),
-                        document,
-                        Some(page.number),
-                        chunk,
-                    ));
-                }
             }
         }
     }
@@ -858,40 +1053,98 @@ pub fn context_chunks(
         right
             .0
             .cmp(&left.0)
-            .then_with(|| left.1.name.cmp(&right.1.name))
+            .then_with(|| left.2.name.cmp(&right.2.name))
     });
-    let mut chosen = vec![];
+    let mut chosen: Vec<usize> = vec![];
     let mut used = HashSet::new();
-    for document in documents.iter().take(10) {
-        if let Some(best) = ranked.iter().find(|item| item.1.id == document.id) {
-            let key = format!("{}:{:?}:{}", best.1.id, best.2, best.3);
-            if used.insert(key) {
-                chosen.push((best.0, best.1, best.2, best.3.clone()));
+    if let Some(exact_index) = ranked.iter().position(|item| item.1) {
+        select_ranked_index(&ranked, &mut chosen, &mut used, exact_index);
+        let document_id = ranked[exact_index].2.id;
+        let chunk_index = ranked[exact_index].3.index;
+        if chunk_index != usize::MAX {
+            for neighbor in [chunk_index.checked_sub(1), chunk_index.checked_add(1)]
+                .into_iter()
+                .flatten()
+            {
+                if let Some(index) = ranked
+                    .iter()
+                    .position(|item| item.2.id == document_id && item.3.index == neighbor)
+                {
+                    select_ranked_index(&ranked, &mut chosen, &mut used, index);
+                }
             }
         }
     }
-    for item in &ranked {
-        if chosen.len() >= 10 {
+    for document in documents.iter().take(6) {
+        if let Some(index) = ranked.iter().position(|item| item.2.id == document.id) {
+            select_ranked_index(&ranked, &mut chosen, &mut used, index);
+        }
+    }
+    for index in 0..ranked.len() {
+        if chosen.len() >= 8 {
             break;
         }
-        let key = format!("{}:{:?}:{}", item.1.id, item.2, item.3);
-        if used.insert(key) {
-            chosen.push((item.0, item.1, item.2, item.3.clone()));
+        if ranked[index].0 > 0 {
+            select_ranked_index(&ranked, &mut chosen, &mut used, index);
         }
     }
     chosen
         .into_iter()
-        .take(10)
+        .take(8)
         .enumerate()
-        .map(|(index, (_, document, page, text))| ContextChunk {
-            id: Uuid::new_v4(),
-            label: format!("资料{}", index + 1),
-            document_id: document.id,
-            document_name: document.title().into(),
-            page,
-            text,
+        .map(|(label_index, ranked_index)| {
+            let (_, _, document, chunk) = &ranked[ranked_index];
+            ContextChunk {
+                id: Uuid::new_v4(),
+                label: format!("资料{}", label_index + 1),
+                document_id: document.id,
+                document_name: document.title().into(),
+                page: chunk.page,
+                text: chunk.text.clone(),
+            }
         })
         .collect()
+}
+
+fn select_ranked_index(
+    ranked: &[(i32, bool, &KnowledgeDocument, CachedChunk)],
+    chosen: &mut Vec<usize>,
+    used: &mut HashSet<(Uuid, usize)>,
+    index: usize,
+) {
+    let item = &ranked[index];
+    if used.insert((item.2.id, item.3.index)) {
+        chosen.push(index);
+    }
+}
+
+fn full_parsed_quote_context(
+    extracted: &ExtractedDocument,
+    quote: &str,
+) -> Option<(Option<usize>, String)> {
+    if quote.trim().is_empty() {
+        return None;
+    }
+    let sources: Vec<(Option<usize>, &str)> = if extracted.pages.is_empty() {
+        vec![(None, extracted.text.as_str())]
+    } else {
+        extracted
+            .pages
+            .iter()
+            .map(|page| (Some(page.number), page.text.as_str()))
+            .collect()
+    };
+    let normalized_quote = normalize_whitespace(quote).to_lowercase();
+    for (page, text) in sources {
+        if let Some(value) = chunks(text, 1400, 240).into_iter().find(|value| {
+            normalize_whitespace(value)
+                .to_lowercase()
+                .contains(&normalized_quote)
+        }) {
+            return Some((page, value));
+        }
+    }
+    None
 }
 
 pub fn annotation_context(
@@ -1029,8 +1282,91 @@ fn file_name(path: &Path) -> String {
         .to_string()
 }
 
+fn safe_filename_part(value: &str, byte_limit: usize) -> String {
+    let mut result = String::new();
+    for character in value.trim().trim_matches(['.', ' ']).chars() {
+        let safe = if character.is_control() || "<>:\"/\\|?*".contains(character) {
+            '_'
+        } else {
+            character
+        };
+        if result.len() + safe.len_utf8() > byte_limit {
+            break;
+        }
+        result.push(safe);
+    }
+    let result = result.trim_end_matches(['.', ' ']).trim();
+    if result.is_empty() {
+        "document".into()
+    } else {
+        result.into()
+    }
+}
+
+fn recognizable_document_name(
+    original: &str,
+    display_name: Option<&str>,
+    extension: &str,
+) -> String {
+    let extension = safe_filename_part(extension.trim_start_matches('.'), 16);
+    let suffix = format!(".{extension}");
+    let preferred = display_name
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| {
+            Path::new(original)
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .unwrap_or(original)
+        });
+    let preferred = if preferred.to_lowercase().ends_with(&suffix.to_lowercase()) {
+        &preferred[..preferred.len() - suffix.len()]
+    } else {
+        preferred
+    };
+    let stem = safe_filename_part(preferred, 170);
+    if extension.is_empty() {
+        stem
+    } else {
+        format!("{stem}.{extension}")
+    }
+}
+
 fn flat_stored_filename(id: Uuid, name: &str) -> String {
-    format!("{id}--{}", name.replace(['/', '\\', ':'], "_"))
+    format!("{id}--{}", safe_filename_part(name, 205))
+}
+
+pub fn migrate_document_filenames(root: &Path, data: &mut KnowledgeData) -> Result<bool, String> {
+    let mut changed = false;
+    for document in &mut data.documents {
+        let Some(display_name) = document.display_name.as_deref() else {
+            continue;
+        };
+        if document.stored_path.is_none() {
+            continue;
+        }
+        let extension = document.extension_name.trim_start_matches('.');
+        let recognizable =
+            recognizable_document_name(&document.name, Some(display_name), extension);
+        let relative = format!(
+            "source/documents/{}",
+            flat_stored_filename(document.id, &recognizable)
+        );
+        if document.stored_path.as_deref() == Some(&relative) {
+            continue;
+        }
+        let current = stored_path(root, document)?;
+        let destination = root.join(&relative);
+        if current != destination {
+            match (current.exists(), destination.exists()) {
+                (true, false) => fs::rename(&current, &destination).map_err(error)?,
+                (false, true) => {}
+                _ => continue,
+            }
+        }
+        document.stored_path = Some(relative);
+        changed = true;
+    }
+    Ok(changed)
 }
 
 fn absolute_clean(path: &Path) -> Result<PathBuf, String> {
@@ -1089,16 +1425,157 @@ mod tests {
     }
 
     #[test]
+    fn cached_chunks_target_256_tokens_and_keep_page_offsets() {
+        let document = KnowledgeDocument {
+            id: Uuid::new_v4(),
+            name: "paper.pdf".into(),
+            display_name: None,
+            extension_name: ".pdf".into(),
+            size: 1,
+            sha256: "digest".into(),
+            stored_path: None,
+            imported_at: now(),
+            status: "ready".into(),
+            page_count: Some(1),
+            error: None,
+            source_url: None,
+        };
+        let extracted = ExtractedDocument {
+            text: "研究".repeat(800),
+            pages: vec![ExtractedPage {
+                number: 3,
+                text: "研究".repeat(800),
+            }],
+        };
+        let cache = build_chunk_cache(&document, &extracted);
+        assert_eq!(cache.target_tokens, 256);
+        assert_eq!(cache.overlap_tokens, 48);
+        assert!(cache.chunks.len() > 3);
+        assert!(cache.chunks.iter().all(|chunk| chunk.page == Some(3)));
+        assert!(cache.chunks.iter().all(|chunk| chunk.start < chunk.end));
+        assert!(cache
+            .chunks
+            .iter()
+            .all(|chunk| chunk.approximate_tokens <= 256));
+        assert!(cache.chunks[1].start < cache.chunks[0].end);
+    }
+
+    #[test]
+    fn selected_quote_recalls_its_chunk_and_builds_cache_lazily() {
+        let root = std::env::temp_dir()
+            .join("KnowledgeMaster-tests")
+            .join(Uuid::new_v4().to_string());
+        prepare_directories(&root).unwrap();
+        let id = Uuid::new_v4();
+        let document = KnowledgeDocument {
+            id,
+            name: "paper.pdf".into(),
+            display_name: Some("Readable paper".into()),
+            extension_name: ".pdf".into(),
+            size: 1,
+            sha256: "digest".into(),
+            stored_path: None,
+            imported_at: now(),
+            status: "ready".into(),
+            page_count: Some(1),
+            error: None,
+            source_url: None,
+        };
+        let extracted = ExtractedDocument {
+            text: format!(
+                "{} selected evidence {}",
+                "before ".repeat(180),
+                "after ".repeat(180)
+            ),
+            pages: vec![],
+        };
+        fs::write(
+            index_dir(&root).join(format!("{id}.json")),
+            serde_json::to_vec(&extracted).unwrap(),
+        )
+        .unwrap();
+        let mut data = KnowledgeData::default();
+        data.documents.push(document);
+        let inner = Inner {
+            root: root.clone(),
+            data,
+            settings: AppSettings::default(),
+        };
+        let values = context_chunks(
+            &inner,
+            "explain this evidence",
+            Some("selected evidence"),
+            &[id],
+            &[],
+        );
+        assert!(values.first().unwrap().text.contains("selected evidence"));
+        assert!(values.len() <= 8);
+        assert!(chunk_cache_path(&root, id).exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn query_terms_support_chinese_punctuation() {
         assert_eq!(query_terms("RAG，Agent。"), vec!["rag", "agent"]);
     }
 
     #[test]
     fn flat_filename_is_cross_platform_safe() {
-        let value = flat_stored_filename(Uuid::nil(), "a:b/c\\d.pdf");
+        let value = flat_stored_filename(Uuid::nil(), "a:b/c\\d?e*.pdf");
         assert!(!value.contains(':'));
         assert!(!value.contains('/'));
         assert!(!value.contains('\\'));
+        assert!(!value.contains('?'));
+        assert!(!value.contains('*'));
+    }
+
+    #[test]
+    fn parsed_title_becomes_the_recognizable_original_filename() {
+        assert_eq!(
+            recognizable_document_name(
+                "2607.24653.pdf",
+                Some("Zhao et al., Retrieval: A Study?"),
+                "pdf"
+            ),
+            "Zhao et al., Retrieval_ A Study_.pdf"
+        );
+    }
+
+    #[test]
+    fn existing_original_is_renamed_when_a_display_title_exists() {
+        let root = std::env::temp_dir()
+            .join("KnowledgeMaster-tests")
+            .join(Uuid::new_v4().to_string());
+        prepare_directories(&root).unwrap();
+        let id = Uuid::new_v4();
+        let old_relative = format!("source/documents/{id}--2607.24653.pdf");
+        fs::write(root.join(&old_relative), b"pdf").unwrap();
+        let mut data = KnowledgeData::default();
+        data.documents.push(KnowledgeDocument {
+            id,
+            name: "2607.24653.pdf".into(),
+            display_name: Some("Zhao et al., Retrieval: A Study?".into()),
+            extension_name: ".pdf".into(),
+            size: 3,
+            sha256: "digest".into(),
+            stored_path: Some(old_relative),
+            imported_at: now(),
+            status: "ready".into(),
+            page_count: Some(1),
+            error: None,
+            source_url: None,
+        });
+        assert!(migrate_document_filenames(&root, &mut data).unwrap());
+        let document = &data.documents[0];
+        assert_eq!(document.name, "2607.24653.pdf");
+        let stored = stored_path(&root, document).unwrap();
+        assert!(stored.exists());
+        let expected = format!("{id}--Zhao et al., Retrieval_ A Study_.pdf");
+        assert_eq!(
+            stored.file_name().and_then(|value| value.to_str()),
+            Some(expected.as_str())
+        );
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
