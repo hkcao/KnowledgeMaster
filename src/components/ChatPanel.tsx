@@ -74,6 +74,8 @@ export default function ChatPanel(props: Props) {
   const [showHistory, setShowHistory] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
   const [showScope, setShowScope] = useState(false);
+  const [scopeQuery, setScopeQuery] = useState("");
+  const [scopeMatches, setScopeMatches] = useState<Set<UUID> | null>(null);
   const [composing, setComposing] = useState(false);
   const [pendingReview, setPendingReview] = useState<string[]>([]);
   const [reviewSelection, setReviewSelection] = useState<Set<string>>(new Set());
@@ -96,6 +98,23 @@ export default function ChatPanel(props: Props) {
     const target = scrollRef.current;
     if (target) target.scrollTop = target.scrollHeight;
   }, [conversation.messages.length, trace.length, sending]);
+
+  useEffect(() => {
+    if (!scopeQuery.trim()) {
+      setScopeMatches(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void api.search(scopeQuery).then((ids) => {
+        if (!cancelled) setScopeMatches(new Set(ids));
+      });
+    }, 180);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [scopeQuery, data.documents]);
 
   async function persistSettings(next: AppSettings) {
     onSettings(next);
@@ -297,13 +316,18 @@ export default function ChatPanel(props: Props) {
             <details>
               <summary>选择文件（{selectedDocuments.size}）</summary>
               <div className="scope-picker">
-                {data.documents.map((document) => (
-                  <label key={document.id}><input type="checkbox" checked={selectedDocuments.has(document.id)} onChange={(event) => {
+                <label className="scope-search">
+                  <FileSearch size={14} />
+                  <input value={scopeQuery} onChange={(event) => setScopeQuery(event.target.value)} placeholder="搜索标题、作者或正文" />
+                </label>
+                {data.documents.filter((document) => !scopeMatches || scopeMatches.has(document.id)).map((document) => (
+                  <label className="scope-document-option" key={document.id}><input type="checkbox" checked={selectedDocuments.has(document.id)} onChange={(event) => {
                     const next = new Set(selectedDocuments);
                     if (event.target.checked) next.add(document.id); else next.delete(document.id);
                     setSelectedDocuments(next);
-                  }} />{displayTitle(document)}</label>
+                  }} /><span>{displayTitle(document)}{document.authors.length > 0 && <small>{document.authors.join(" · ")}</small>}</span></label>
                 ))}
+                {scopeMatches && !data.documents.some((document) => scopeMatches.has(document.id)) && <span className="scope-empty">没有匹配资料</span>}
               </div>
             </details>
             <details>

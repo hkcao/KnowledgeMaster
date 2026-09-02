@@ -155,7 +155,11 @@ export default function App() {
       currentDocumentId={currentId}
       externalRecommendationIds={externalRecommendationIds}
       onData={updateData}
-      onReload={async () => updateData(await api.reload())}
+      onReload={async () => {
+        const data = await api.reload();
+        updateData(data);
+        return data;
+      }}
       onExternalRecommendationsHandled={() => setExternalRecommendationIds([])}
       onOpenDocument={openDocument}
       onOpenAnnotation={openAnnotation}

@@ -62,6 +62,7 @@ impl AppState {
         prepare_directories(&root)?;
         let mut data = load_data(&root)?;
         migrate_notes(&root, &mut data)?;
+        migrate_document_authors(&root, &mut data);
         migrate_document_filenames(&root, &mut data)?;
         save_data(&root, &data)?;
         Ok(Self {
@@ -189,7 +190,7 @@ pub fn load_data(root: &Path) -> Result<KnowledgeData, String> {
     }
     let mut data: KnowledgeData =
         serde_json::from_slice(&fs::read(path).map_err(error)?).map_err(error)?;
-    data.version = 6;
+    data.version = 7;
     for conversation in &mut data.conversations {
         conversation.summary_message_count = conversation
             .summary_message_count
@@ -234,7 +235,9 @@ pub fn switch_root(inner: &mut Inner, target: PathBuf, migrate: bool) -> Result<
     inner.root = target;
     inner.data = load_data(&inner.root)?;
     migrate_notes(&inner.root, &mut inner.data)?;
+    migrate_document_authors(&inner.root, &mut inner.data);
     migrate_document_filenames(&inner.root, &mut inner.data)?;
+    sync_source_documents(inner)?;
     save_root_preference(&inner.root)?;
     save_data(&inner.root, &inner.data)
 }
@@ -516,6 +519,15 @@ pub fn import_one(
     path: &Path,
     source_url: Option<String>,
 ) -> Result<String, String> {
+    import_one_with_storage(inner, path, source_url, false)
+}
+
+fn import_one_with_storage(
+    inner: &mut Inner,
+    path: &Path,
+    source_url: Option<String>,
+    adopt_source: bool,
+) -> Result<String, String> {
     let extension = extension(path);
     if !SUPPORTED_EXTENSIONS.contains(&extension.as_str()) {
         return Ok(format!("不支持：{}", file_name(path)));
@@ -548,23 +560,23 @@ pub fn import_one(
     } else {
         None
     };
+    let authors = extract_authors(&extension, &bytes, &extracted);
     let recognizable_name = recognizable_document_name(&name, display_name.as_deref(), &extension);
     let stored_name = flat_stored_filename(id, &recognizable_name);
     let relative = format!("source/documents/{stored_name}");
     let destination = inner.root.join(&relative);
-    fs::copy(path, &destination).map_err(error)?;
     let index_path = index_dir(&inner.root).join(format!("{id}.json"));
     if let Err(value) = fs::write(
         &index_path,
         serde_json::to_vec_pretty(&extracted).map_err(error)?,
     ) {
-        let _ = fs::remove_file(&destination);
         return Err(error(value));
     }
     let document = KnowledgeDocument {
         id,
         name: name.clone(),
         display_name,
+        authors,
         extension_name: format!(".{extension}"),
         size: bytes.len() as i64,
         sha256: digest,
@@ -576,13 +588,75 @@ pub fn import_one(
         source_url,
     };
     if let Err(value) = write_chunk_cache(&inner.root, &document, &extracted) {
-        let _ = fs::remove_file(&destination);
         let _ = fs::remove_file(&index_path);
         return Err(value);
     }
+    let stored = if adopt_source {
+        fs::rename(path, &destination)
+    } else {
+        fs::copy(path, &destination).map(|_| ())
+    };
+    if let Err(value) = stored {
+        let _ = fs::remove_file(&index_path);
+        let _ = fs::remove_file(chunk_cache_path(&inner.root, id));
+        return Err(error(value));
+    }
     inner.data.documents.push(document);
-    save_data(&inner.root, &inner.data)?;
+    if let Err(value) = save_data(&inner.root, &inner.data) {
+        inner.data.documents.pop();
+        if adopt_source {
+            let _ = fs::rename(&destination, path);
+        } else {
+            let _ = fs::remove_file(&destination);
+        }
+        let _ = fs::remove_file(&index_path);
+        let _ = fs::remove_file(chunk_cache_path(&inner.root, id));
+        return Err(value);
+    }
     Ok(format!("已导入：{name}"))
+}
+
+pub fn sync_source_documents(inner: &mut Inner) -> Result<usize, String> {
+    prepare_directories(&inner.root)?;
+    let mut known_paths = inner
+        .data
+        .documents
+        .iter()
+        .filter_map(|document| stored_path(&inner.root, document).ok())
+        .filter_map(|path| absolute_clean(&path).ok())
+        .collect::<HashSet<_>>();
+    let mut candidates = vec![];
+    for directory in [source_dir(&inner.root), documents_dir(&inner.root)] {
+        for entry in fs::read_dir(directory).map_err(error)? {
+            let entry = entry.map_err(error)?;
+            if entry.file_type().map_err(error)?.is_file()
+                && SUPPORTED_EXTENSIONS.contains(&extension(&entry.path()).as_str())
+            {
+                candidates.push(entry.path());
+            }
+        }
+    }
+    candidates.sort();
+    candidates.dedup();
+
+    let mut imported = 0;
+    for path in candidates {
+        let clean = absolute_clean(&path)?;
+        if known_paths.contains(&clean) {
+            continue;
+        }
+        let before = inner.data.documents.len();
+        import_one_with_storage(inner, &path, None, true)?;
+        if inner.data.documents.len() > before {
+            imported += 1;
+            if let Some(document) = inner.data.documents.last() {
+                if let Ok(stored) = stored_path(&inner.root, document) {
+                    known_paths.insert(absolute_clean(&stored)?);
+                }
+            }
+        }
+    }
+    Ok(imported)
 }
 
 pub fn delete_document(inner: &mut Inner, id: Uuid) -> Result<(), String> {
@@ -732,10 +806,16 @@ pub fn search_documents(inner: &Inner, query: &str) -> Vec<Uuid> {
         .iter()
         .filter(|document| {
             let extracted = read_extracted(&inner.root, document.id).text.to_lowercase();
-            let name = format!("{}\n{}", document.name, document.title()).to_lowercase();
+            let metadata = format!(
+                "{}\n{}\n{}",
+                document.name,
+                document.title(),
+                document.authors.join("\n")
+            )
+            .to_lowercase();
             terms
                 .iter()
-                .any(|term| name.contains(term) || extracted.contains(term))
+                .any(|term| metadata.contains(term) || extracted.contains(term))
         })
         .map(|document| document.id)
         .collect()
@@ -1212,7 +1292,7 @@ pub fn chunks(text: &str, size: usize, overlap: usize) -> Vec<String> {
     values
 }
 
-fn paper_display_name(extracted: &ExtractedDocument) -> Option<String> {
+fn paper_title_and_authors(extracted: &ExtractedDocument) -> Option<(String, Vec<String>)> {
     let source = extracted
         .pages
         .first()
@@ -1222,16 +1302,49 @@ fn paper_display_name(extracted: &ExtractedDocument) -> Option<String> {
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty())
-        .take(12)
+        .take(40)
         .collect();
     if !source.to_lowercase().contains("abstract") && !source.contains("摘要") {
         return None;
     }
-    let title = lines.iter().find(|line| {
+    let title = lines.iter().take(12).find(|line| {
         line.len() >= 12 && line.len() <= 300 && !line.to_lowercase().contains("arxiv")
     })?;
     let title_index = lines.iter().position(|line| line == title).unwrap_or(0);
-    let author = lines.get(title_index + 1).copied().unwrap_or("");
+    let abstract_index = lines
+        .iter()
+        .position(|line| {
+            let lower = line.to_lowercase();
+            lower == "abstract" || lower.starts_with("abstract ") || line.starts_with("摘要")
+        })
+        .unwrap_or(lines.len());
+    let authors_start = title_index.saturating_add(1).min(lines.len());
+    let authors_end = abstract_index.max(authors_start).min(lines.len());
+    let authors = lines[authors_start..authors_end]
+        .iter()
+        .copied()
+        .filter(|line| {
+            let lower = line.to_lowercase();
+            !line.contains('@')
+                && ![
+                    "university",
+                    "institute",
+                    "department",
+                    "laboratory",
+                    "school of",
+                ]
+                .iter()
+                .any(|marker| lower.contains(marker))
+        })
+        .take(4)
+        .map(str::to_string)
+        .collect();
+    Some(((*title).to_string(), authors))
+}
+
+fn paper_display_name(extracted: &ExtractedDocument) -> Option<String> {
+    let (title, authors) = paper_title_and_authors(extracted)?;
+    let author = authors.first().map(String::as_str).unwrap_or("");
     let surname = author
         .split([',', ';'])
         .next()
@@ -1241,7 +1354,7 @@ fn paper_display_name(extracted: &ExtractedDocument) -> Option<String> {
         .unwrap_or("")
         .trim_matches(|character: char| character.is_ascii_punctuation());
     if surname.is_empty() {
-        Some((*title).to_string())
+        Some(title)
     } else if author.contains(',')
         || author.contains(';')
         || author.to_lowercase().contains(" and ")
@@ -1249,6 +1362,67 @@ fn paper_display_name(extracted: &ExtractedDocument) -> Option<String> {
         Some(format!("{surname} et al., {title}"))
     } else {
         Some(format!("{surname}, {title}"))
+    }
+}
+
+fn html_authors(source: &str) -> Vec<String> {
+    let parsed = scraper::Html::parse_document(source);
+    let selector = scraper::Selector::parse("meta[name], meta[property]").unwrap();
+    let mut authors = vec![];
+    for element in parsed.select(&selector) {
+        let key = element
+            .value()
+            .attr("name")
+            .or_else(|| element.value().attr("property"))
+            .unwrap_or("")
+            .to_lowercase();
+        if matches!(
+            key.as_str(),
+            "author" | "article:author" | "citation_author" | "dc.creator"
+        ) {
+            if let Some(value) = element.value().attr("content").map(str::trim) {
+                if !value.is_empty() && !authors.iter().any(|author| author == value) {
+                    authors.push(value.to_string());
+                }
+            }
+        }
+    }
+    authors
+}
+
+fn declared_authors(source: &str) -> Vec<String> {
+    source
+        .lines()
+        .take(30)
+        .find_map(|line| {
+            let trimmed = line.trim();
+            let lower = trimmed.to_lowercase();
+            ["author:", "authors:"].iter().find_map(|prefix| {
+                lower
+                    .strip_prefix(prefix)
+                    .map(|_| trimmed[prefix.len()..].trim())
+            })
+        })
+        .map(|value| {
+            value
+                .trim_matches(|character| matches!(character, '[' | ']' | '\'' | '"'))
+                .split([',', ';'])
+                .map(str::trim)
+                .filter(|author| !author.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn extract_authors(extension: &str, bytes: &[u8], extracted: &ExtractedDocument) -> Vec<String> {
+    match extension {
+        "pdf" => paper_title_and_authors(extracted)
+            .map(|(_, authors)| authors)
+            .unwrap_or_default(),
+        "html" | "htm" => html_authors(&String::from_utf8_lossy(bytes)),
+        "md" | "markdown" | "txt" => declared_authors(&extracted.text),
+        _ => vec![],
     }
 }
 
@@ -1369,6 +1543,31 @@ pub fn migrate_document_filenames(root: &Path, data: &mut KnowledgeData) -> Resu
     Ok(changed)
 }
 
+pub fn migrate_document_authors(root: &Path, data: &mut KnowledgeData) -> bool {
+    let mut changed = false;
+    for document in &mut data.documents {
+        if !document.authors.is_empty() {
+            continue;
+        }
+        let extracted = read_extracted(root, document.id);
+        let extension = document.extension_name.trim_start_matches('.');
+        let bytes = if matches!(extension, "html" | "htm") {
+            stored_path(root, document)
+                .ok()
+                .and_then(|path| fs::read(path).ok())
+                .unwrap_or_default()
+        } else {
+            vec![]
+        };
+        let authors = extract_authors(extension, &bytes, &extracted);
+        if !authors.is_empty() {
+            document.authors = authors;
+            changed = true;
+        }
+    }
+    changed
+}
+
 fn absolute_clean(path: &Path) -> Result<PathBuf, String> {
     if path.as_os_str().is_empty() {
         return Err("目录不能为空".into());
@@ -1430,6 +1629,7 @@ mod tests {
             id: Uuid::new_v4(),
             name: "paper.pdf".into(),
             display_name: None,
+            authors: vec![],
             extension_name: ".pdf".into(),
             size: 1,
             sha256: "digest".into(),
@@ -1471,6 +1671,7 @@ mod tests {
             id,
             name: "paper.pdf".into(),
             display_name: Some("Readable paper".into()),
+            authors: vec![],
             extension_name: ".pdf".into(),
             size: 1,
             sha256: "digest".into(),
@@ -1520,6 +1721,40 @@ mod tests {
     }
 
     #[test]
+    fn refresh_imports_manual_files_and_author_search_finds_them() {
+        let root = std::env::temp_dir()
+            .join("KnowledgeMaster-tests")
+            .join(Uuid::new_v4().to_string());
+        prepare_directories(&root).unwrap();
+        let root_file = source_dir(&root).join("manual-paper.md");
+        let documents_file = documents_dir(&root).join("notes.txt");
+        fs::write(
+            &root_file,
+            "---\nauthor: Ada Lovelace, Alan Turing\n---\nkeyword body",
+        )
+        .unwrap();
+        fs::write(&documents_file, "second document").unwrap();
+        let mut inner = Inner {
+            root: root.clone(),
+            data: KnowledgeData::default(),
+            settings: AppSettings::default(),
+        };
+
+        assert_eq!(sync_source_documents(&mut inner).unwrap(), 2);
+        assert!(!root_file.exists());
+        assert!(!documents_file.exists());
+        assert!(inner
+            .data
+            .documents
+            .iter()
+            .all(|document| stored_path(&root, document).unwrap().exists()));
+        assert_eq!(search_documents(&inner, "Lovelace").len(), 1);
+        assert_eq!(search_documents(&inner, "keyword body").len(), 1);
+        assert_eq!(sync_source_documents(&mut inner).unwrap(), 0);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn flat_filename_is_cross_platform_safe() {
         let value = flat_stored_filename(Uuid::nil(), "a:b/c\\d?e*.pdf");
         assert!(!value.contains(':'));
@@ -1555,6 +1790,7 @@ mod tests {
             id,
             name: "2607.24653.pdf".into(),
             display_name: Some("Zhao et al., Retrieval: A Study?".into()),
+            authors: vec![],
             extension_name: ".pdf".into(),
             size: 3,
             sha256: "digest".into(),

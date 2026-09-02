@@ -228,6 +228,11 @@ details > summary::-webkit-details-marker { display: none; }
 .scope-body details { position: relative; }
 .scope-picker { max-height: 150px; overflow: auto; display: grid; gap: 3px; padding: 5px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }
 .scope-picker label { display: flex; align-items: center; gap: 4px; }
+.scope-search { position: sticky; top: -5px; z-index: 1; padding: 5px; background: var(--surface); border-bottom: 1px solid var(--border); color: var(--text-muted); }
+.scope-search input { min-width: 0; width: 100%; border: 0; box-shadow: none; background: transparent; padding: 3px; }
+.scope-document-option > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scope-document-option small { display: block; overflow: hidden; color: var(--text-muted); font-size: 10px; text-overflow: ellipsis; }
+.scope-empty { padding: 8px; color: var(--text-muted); text-align: center; }
 .chat-scope > small { display: block; margin-top: 5px; font-size: 11px; line-height: 1.4; }
 .selected-document-chips { display: flex; gap: 4px; margin-top: 7px; overflow-x: auto; scrollbar-width: thin; }
 .selected-document-chips button { flex: 0 0 auto; max-width: 210px; display: flex; align-items: center; gap: 4px; padding: 3px 6px; border-color: rgba(8,127,143,.22); border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 12px; }

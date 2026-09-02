@@ -298,6 +298,7 @@ mod tests {
             id: Uuid::nil(),
             name: "paper.md".into(),
             display_name: None,
+            authors: vec![],
             extension_name: ".md".into(),
             size: 0,
             sha256: String::new(),

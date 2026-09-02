@@ -7,6 +7,7 @@ export interface KnowledgeDocument {
   id: UUID;
   name: string;
   displayName?: string | null;
+  authors: string[];
   extension: string;
   size: number;
   sha256: string;

@@ -13,6 +13,8 @@ pub struct KnowledgeDocument {
     pub name: String,
     #[serde(default)]
     pub display_name: Option<String>,
+    #[serde(default)]
+    pub authors: Vec<String>,
     #[serde(rename = "extension")]
     pub extension_name: String,
     pub size: i64,
@@ -304,7 +306,7 @@ impl Default for KnowledgeData {
 }
 
 fn version() -> usize {
-    6
+    7
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

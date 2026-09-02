@@ -43,7 +43,10 @@ fn reload_library(state: State<'_, AppState>) -> Result<KnowledgeData, String> {
     inner.data = store::load_data(&inner.root)?;
     let root = inner.root.clone();
     store::migrate_notes(&root, &mut inner.data)?;
-    if store::migrate_document_filenames(&root, &mut inner.data)? {
+    let metadata_changed = store::migrate_document_authors(&root, &mut inner.data);
+    let filenames_changed = store::migrate_document_filenames(&root, &mut inner.data)?;
+    let imported = store::sync_source_documents(&mut inner)?;
+    if (metadata_changed || filenames_changed) && imported == 0 {
         store::save_data(&root, &inner.data)?;
     }
     Ok(inner.data.clone())

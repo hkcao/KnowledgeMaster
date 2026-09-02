@@ -39,7 +39,7 @@ interface Props {
   currentDocumentId?: UUID | null;
   externalRecommendationIds?: UUID[];
   onData: (data: KnowledgeData) => void;
-  onReload: () => Promise<void>;
+  onReload: () => Promise<KnowledgeData>;
   onExternalRecommendationsHandled?: () => void;
   onOpenDocument: (document: KnowledgeDocument) => void;
   onOpenAnnotation: (id: UUID) => void;
@@ -214,8 +214,11 @@ export default function LibrarySidebar(props: Props) {
     if (refreshing) return;
     setRefreshing(true);
     try {
-      await onReload();
-      setMessage("目录已刷新");
+      const before = new Set(data.documents.map((document) => document.id));
+      const next = await onReload();
+      const imported = next.documents.filter((document) => !before.has(document.id));
+      setMessage(imported.length ? `目录已刷新，新增 ${imported.length} 份资料` : "目录已刷新，没有发现新资料");
+      await showRecommendations(imported);
     } catch (error) {
       setMessage(`刷新失败：${String(error)}`);
     } finally {
@@ -384,7 +387,7 @@ export default function LibrarySidebar(props: Props) {
         <div className="library-body">
           <label className="search-field">
             <Search size={15} />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索文件名、正文或主题" />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索标题、作者、正文或主题" />
           </label>
           <div className="import-actions">
             <button className="primary small" onClick={pickFiles}><FilePlus2 size={14} />导入文件</button>
