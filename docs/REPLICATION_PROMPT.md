@@ -88,8 +88,8 @@
 
 ```text
 <library>/
-├── knowledge.json
-├── knowledge.json.bak
+├── knowledge.db
+├── knowledge.json.migrated-v8.bak  # 仅旧版迁移后存在
 └── source/
     ├── documents/
     │   └── <UUID>--<原文件名>
@@ -107,9 +107,11 @@
 约束：
 
 - 原文件平铺放在 `source/documents/`，不为每份资料创建单独文件夹。
-- 所有元数据写入先生成备份，再原子替换 `knowledge.json`。
-- `knowledge.json` 使用可读 JSON、稳定字段名和 ISO 8601 日期。
-- 切换资料库时询问是否迁移；迁移复制 `knowledge.json`、备份和 `source/`，不覆盖目标中已有同名内容。
+- 元数据使用 SQLite，启用外键、`synchronous=FULL` 和回滚日志；不要在同步盘使用 WAL sidecar。
+- 核心实体规范化为 `documents`、`document_authors`、`topics`、`document_topics`、`bookmarks`、`annotations`、`annotation_rects`、`conversations`、`conversation_messages`、`summary_notes` 等表；多对多关系使用独立关联表。
+- 为文件哈希、标题、作者、主题父级、文档批注页码和会话消息顺序建立索引。消息中的引用、来源和 Agent 轨迹可以使用 JSON 列，避免把易变载荷过度拆表。
+- 保存时在单个事务中根据实体指纹只更新变化的实体；删除依赖外键级联。旧版 `knowledge.json` 首次启动时自动导入，校验关系后保留为 `knowledge.json.migrated-v8.bak`。
+- 切换资料库时询问是否迁移；迁移复制 `knowledge.db`、旧版迁移备份和 `source/`，不覆盖目标中已有同名内容。
 - 资料库路径和模型设置保存在应用本地配置中，不能写进可能被同步的知识库。
 
 ## 5. 数据模型
@@ -272,7 +274,7 @@ PDF 选区必须同时生成：
 1. 提取出的原文；
 2. 选区附近带少量 padding 的 PNG 截图。
 
-截图裁剪不可超出页面。截图是瞬时上下文，不持久化进 `knowledge.json`；历史只保存文字、文档和页码。直接 API 仅在用户开启“模型支持图片”时发送截图；Agent 模式把截图作为只读文件加入本轮控制目录。
+截图裁剪不可超出页面。截图是瞬时上下文，不持久化进 SQLite；历史只保存文字、文档和页码。直接 API 仅在用户开启“模型支持图片”时发送截图；Agent 模式把截图作为只读文件加入本轮控制目录。
 
 ### 9.3 批注
 
@@ -352,7 +354,7 @@ PDF 选区必须同时生成：
 
 ### 12.4 历史与摘要
 
-- 所有完成的对话保存到 `knowledge.json`。
+- 所有完成的对话保存到 SQLite 的会话与消息表。
 - 历史列表显示首条可见问题、更新时间和实际引用过的文档名。
 - 打开历史时恢复范围选择、开关、摘要和消息。
 - “新对话”清空当前状态但不删除历史。
@@ -518,7 +520,7 @@ Claude Code 使用 stream-json、verbose、hook events、默认工具和用户�
 2. Agent 原文件副本为只读，CLI 写入只能发生在 work。
 3. 删除主题不删除原件；删除文档必须确认。
 4. 图片截图不写入对话历史。
-5. API Key 不出现在知识库 JSON、日志、前端持久化或错误信息。
+5. API Key 不出现在知识库 SQLite、日志、前端持久化或错误信息。
 6. HTML 预览和 Markdown 禁止执行资料中的任意脚本。
 7. Agent 流式日志不显示完整临时路径和 home 路径。
 8. 只有用户明确选择的文档、主题、批注和当前页面进入本轮权限范围。

@@ -1,4 +1,4 @@
-import type { ChatBackend, ChatMessage, Conversation, ReaderQuote, UUID } from "./types";
+import type { AnnotationRect, ChatBackend, ChatMessage, Conversation, ReaderQuote, UUID } from "./types";
 
 export const legacySelectionPrompt = "请结合上下文回答我关于这段内容的问题：";
 
@@ -113,6 +113,35 @@ export function selectionToolbarPosition(
     x: Math.min(Math.max(margin, preferredX), Math.max(margin, container.width - toolbar.width - margin)),
     y: Math.min(Math.max(margin, preferredY), Math.max(margin, container.height - toolbar.height - margin))
   };
+}
+
+export function normalizeAnnotationRects(rects: AnnotationRect[]): AnnotationRect[] {
+  const normalized = rects
+    .filter((rect) => Number.isFinite(rect.x) && Number.isFinite(rect.y) && rect.width > 0.5 && rect.height > 0.5)
+    .map((rect) => ({ ...rect }))
+    .sort((left, right) => left.page - right.page || left.y - right.y || left.x - right.x);
+  const merged: AnnotationRect[] = [];
+  for (const rect of normalized) {
+    const current = merged.at(-1);
+    if (!current || current.page !== rect.page) {
+      merged.push(rect);
+      continue;
+    }
+    const verticalOverlap = Math.max(0, Math.min(current.y + current.height, rect.y + rect.height) - Math.max(current.y, rect.y));
+    const sameLine = verticalOverlap / Math.min(current.height, rect.height) >= 0.65;
+    const horizontalGap = rect.x - (current.x + current.width);
+    if (!sameLine || horizontalGap > Math.max(2, Math.min(current.height, rect.height) * 0.35)) {
+      merged.push(rect);
+      continue;
+    }
+    const right = Math.max(current.x + current.width, rect.x + rect.width);
+    const bottom = Math.max(current.y + current.height, rect.y + rect.height);
+    current.x = Math.min(current.x, rect.x);
+    current.y = Math.min(current.y, rect.y);
+    current.width = right - current.x;
+    current.height = bottom - current.y;
+  }
+  return merged;
 }
 
 export function escapeHTML(value: string): string {

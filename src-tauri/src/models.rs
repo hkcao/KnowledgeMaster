@@ -81,6 +81,47 @@ pub struct AnnotationRect {
     pub height: f64,
 }
 
+pub fn normalize_annotation_rects(mut rects: Vec<AnnotationRect>) -> Vec<AnnotationRect> {
+    rects.retain(|rect| {
+        rect.page > 0
+            && rect.x.is_finite()
+            && rect.y.is_finite()
+            && rect.width.is_finite()
+            && rect.height.is_finite()
+            && rect.width > 0.5
+            && rect.height > 0.5
+    });
+    rects.sort_by(|left, right| {
+        left.page
+            .cmp(&right.page)
+            .then_with(|| left.y.total_cmp(&right.y))
+            .then_with(|| left.x.total_cmp(&right.x))
+    });
+    let mut merged: Vec<AnnotationRect> = vec![];
+    for rect in rects {
+        let Some(current) = merged.last_mut() else {
+            merged.push(rect);
+            continue;
+        };
+        let vertical_overlap =
+            (current.y + current.height).min(rect.y + rect.height) - current.y.max(rect.y);
+        let same_line = current.page == rect.page
+            && vertical_overlap.max(0.0) / current.height.min(rect.height) >= 0.65;
+        let horizontal_gap = rect.x - (current.x + current.width);
+        if !same_line || horizontal_gap > 2.0_f64.max(current.height.min(rect.height) * 0.35) {
+            merged.push(rect);
+            continue;
+        }
+        let right = (current.x + current.width).max(rect.x + rect.width);
+        let bottom = (current.y + current.height).max(rect.y + rect.height);
+        current.x = current.x.min(rect.x);
+        current.y = current.y.min(rect.y);
+        current.width = right - current.x;
+        current.height = bottom - current.y;
+    }
+    merged
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KnowledgeAnnotation {
@@ -306,7 +347,7 @@ impl Default for KnowledgeData {
 }
 
 fn version() -> usize {
-    7
+    8
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

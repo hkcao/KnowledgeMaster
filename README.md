@@ -1,5 +1,7 @@
 # 知屿 KnowledgeMaster
 
+[简体中文](README.md) | [English](README.en.md)
+
 > 面向科研论文学习的本地优先知识工作台，Tauri 版本同时面向 macOS 与 Windows。
 
 知屿把“收集论文 → 精读与批注 → 研究笔记 → 跨文档问答 → 沉淀理解”放在一个桌面应用中。资料和元数据默认留在用户自己的磁盘；AI 只在用户发起请求时访问明确授权的范围。
@@ -45,7 +47,7 @@
 - API Key 使用 macOS Keychain 或 Windows Credential Manager。
 - 启动应用、打开设置和切换服务商不会读取 Key；发送请求或测试连接时才按需访问。
 - Agent 只能写入隔离工作区；原始资料副本和解析缓存只读。
-- `knowledge.json` 原子更新并保留上一版备份。
+- 元数据使用带外键和索引的 SQLite；旧版 `knowledge.json` 首次启动时自动迁移并保留一份后续不再写入的备份。
 - 前端不具有任意文件系统权限，文件操作统一由 Rust 命令校验。
 
 ## 平台与技术
@@ -149,8 +151,8 @@ macOS 与 Windows 的正式安装包应在各自系统上构建。仓库提供 `
 
 ```text
 <资料库目录>/
-├── knowledge.json
-├── knowledge.json.bak
+├── knowledge.db                   # SQLite 元数据
+├── knowledge.json.migrated-v8.bak # 仅旧版首次迁移时生成
 └── source/
     ├── documents/                 # 导入原件
     ├── downloads/pending/         # Agent 下载待确认
@@ -159,7 +161,7 @@ macOS 与 Windows 的正式安装包应在各自系统上构建。仓库提供 `
     └── notes/                     # 总结类 Markdown 笔记
 ```
 
-macOS 与 Windows 使用相同的相对路径和 JSON 格式。资料库可随同步盘迁移，但不建议两台设备同时修改同一个资料库。
+macOS 与 Windows 使用相同的相对路径和 SQLite schema。资料库可随同步盘迁移，但不建议两台设备同时打开并修改同一个资料库。
 
 ## Agent 接入
 

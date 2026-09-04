@@ -30,7 +30,7 @@ import type {
   ReaderQuote,
   UUID
 } from "../types";
-import { displayTitle, fitPDFScale, formatBytes, pdfOutputScale, selectionToolbarPosition } from "../utils";
+import { displayTitle, fitPDFScale, formatBytes, normalizeAnnotationRects, pdfOutputScale, selectionToolbarPosition } from "../utils";
 import MarkdownView from "./MarkdownView";
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
@@ -106,24 +106,31 @@ export default function Reader({ document, data, focusedAnnotationId, layoutRevi
 
   async function addAnnotation(kind: AnnotationKind, note = "") {
     if (!selection) return;
-    onData(await api.addAnnotation(document!.id, selection.text, selection.page, kind, note, selection.rects));
-    setSelection(null);
-    window.getSelection()?.removeAllRanges();
+    try {
+      onData(await api.addAnnotation(document!.id, selection.text, selection.page, kind, note, selection.rects));
+      setSelection(null);
+      window.getSelection()?.removeAllRanges();
+    } catch (value) {
+      setError(String(value));
+    }
   }
 
   async function saveNote() {
     const value = noteDraft.trim();
     if (!value) return;
-    if (editing && "selection" in editing) {
-      setSelection(editing.selection);
-      const source = editing.selection;
-      onData(await api.addAnnotation(document!.id, source.text, source.page, "note", value, source.rects));
-      setSelection(null);
-    } else if (editing) {
-      onData(await api.updateAnnotation(editing.id, value));
+    try {
+      if (editing && "selection" in editing) {
+        const source = editing.selection;
+        onData(await api.addAnnotation(document!.id, source.text, source.page, "note", value, source.rects));
+        setSelection(null);
+      } else if (editing) {
+        onData(await api.updateAnnotation(editing.id, value));
+      }
+      setEditing(null);
+      setNoteDraft("");
+    } catch (value) {
+      setError(String(value));
     }
-    setEditing(null);
-    setNoteDraft("");
   }
 
   function askSelection() {
@@ -600,13 +607,15 @@ function PDFReader({
     }
     const host = scroller.current.getBoundingClientRect();
     const position = selectionToolbarPosition(host, last);
+    const normalizedRects = normalizeAnnotationRects(rects);
+    if (!normalizedRects.length) return onSelection(null);
     onSelection({
       text,
       page: targetPage,
-      rects,
+      rects: normalizedRects,
       x: position.x,
       y: position.y,
-      imageBase64: snapshotSelection(rects, pages, pageRefs.current, zoom)
+      imageBase64: snapshotSelection(normalizedRects, pages, pageRefs.current, zoom)
     });
   }
 
@@ -724,10 +733,18 @@ function PDFPage({
           const width = Math.abs(x2 - x1);
           const height = Math.abs(y2 - y1);
           return (
-            <div
+            <button
+              type="button"
               key={`${annotation.id}-${rectIndex}`}
               className={`pdf-annotation ${annotation.kind}`}
               style={{ left, top, width, height }}
+              title={annotation.note || annotation.quote}
+              aria-label={`打开${annotation.kind === "underline" ? "划线" : "高亮"}批注`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onAnnotation(annotation);
+              }}
+              onPointerUp={(event) => event.stopPropagation()}
             />
           );
         }))}

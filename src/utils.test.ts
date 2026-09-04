@@ -6,6 +6,7 @@ import {
   fitPDFScale,
   legacySelectionPrompt,
   newConversation,
+  normalizeAnnotationRects,
   pendingSummaryMessages,
   pdfOutputScale,
   resolveDocumentIDs,
@@ -107,5 +108,17 @@ describe("reader selection toolbar", () => {
       container,
       { left: 930, right: 990, top: 260, bottom: 280 }
     ).x).toBe(502);
+  });
+
+  it("merges duplicate and touching PDF selection rectangles on the same line", () => {
+    expect(normalizeAnnotationRects([
+      { page: 1, x: 10, y: 20, width: 40, height: 10 },
+      { page: 1, x: 10.1, y: 20.1, width: 39.8, height: 9.8 },
+      { page: 1, x: 51, y: 20, width: 20, height: 10 },
+      { page: 1, x: 10, y: 40, width: 30, height: 10 }
+    ])).toEqual([
+      { page: 1, x: 10, y: 20, width: 61, height: 10 },
+      { page: 1, x: 10, y: 40, width: 30, height: 10 }
+    ]);
   });
 });

@@ -200,9 +200,12 @@ details > summary::-webkit-details-marker { display: none; }
 .pdf-text-layer .markedContent { display: contents; }
 .pdf-text-layer ::selection { background: rgba(52, 120, 246, .3); }
 .pdf-annotation-layer { z-index: 4; pointer-events: none; }
-.pdf-annotation { position: absolute; pointer-events: none; }
-.pdf-annotation.highlight, .pdf-annotation.note { background: rgba(255, 217, 64, .34); mix-blend-mode: multiply; }
-.pdf-annotation.underline { border-bottom: 2px solid #e79a18; }
+.pdf-annotation { position: absolute; pointer-events: auto; appearance: none; margin: 0; padding: 0; border: 0; border-radius: 2px; cursor: pointer; }
+.pdf-annotation.highlight, .pdf-annotation.note { background: rgba(255, 224, 92, .42); }
+.pdf-annotation.underline { background: transparent; border-bottom: 2px solid #e79a18; border-radius: 0; }
+button.pdf-annotation.highlight:hover:not(:disabled), button.pdf-annotation.note:hover:not(:disabled) { background: rgba(255, 224, 92, .5); border-color: transparent; }
+button.pdf-annotation.underline:hover:not(:disabled) { background: transparent; border-color: #e79a18; }
+.pdf-annotation:hover, .pdf-annotation:focus-visible { outline: 2px solid rgba(21, 119, 130, .72); outline-offset: 1px; }
 .annotation-bubble { pointer-events: auto; z-index: 8; position: absolute; width: 25px; height: 25px; padding: 0; border: 0; border-radius: 50%; color: white; background: var(--green); box-shadow: 0 2px 7px rgba(0,0,0,.22); }
 .bookmark-ribbon { z-index: 9; position: absolute; right: 8px; top: 0; width: 28px; height: 36px; border: 0; border-radius: 0 0 8px 8px; background: rgba(255,255,255,.62); color: rgba(237,139,36,.5); opacity: .26; }
 .bookmark-ribbon:hover, .bookmark-ribbon.active { opacity: 1; color: white; background: #ed8b24; }

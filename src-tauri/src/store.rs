@@ -184,13 +184,8 @@ pub fn prepare_directories(root: &Path) -> Result<(), String> {
 }
 
 pub fn load_data(root: &Path) -> Result<KnowledgeData, String> {
-    let path = root.join("knowledge.json");
-    if !path.exists() {
-        return Ok(KnowledgeData::default());
-    }
-    let mut data: KnowledgeData =
-        serde_json::from_slice(&fs::read(path).map_err(error)?).map_err(error)?;
-    data.version = 7;
+    let mut data = crate::database::load_or_migrate(root)?;
+    data.version = 8;
     for conversation in &mut data.conversations {
         conversation.summary_message_count = conversation
             .summary_message_count
@@ -201,25 +196,20 @@ pub fn load_data(root: &Path) -> Result<KnowledgeData, String> {
 
 pub fn save_data(root: &Path, data: &KnowledgeData) -> Result<(), String> {
     prepare_directories(root)?;
-    let metadata = root.join("knowledge.json");
-    let backup = root.join("knowledge.json.bak");
-    let temporary = root.join("knowledge.json.tmp");
-    if metadata.exists() {
-        let _ = fs::copy(&metadata, &backup);
-    }
-    fs::write(&temporary, serde_json::to_vec_pretty(data).map_err(error)?).map_err(error)?;
-    #[cfg(windows)]
-    if metadata.exists() {
-        fs::remove_file(&metadata).map_err(error)?;
-    }
-    fs::rename(&temporary, &metadata).map_err(error)
+    crate::database::save(root, data)
 }
 
 pub fn switch_root(inner: &mut Inner, target: PathBuf, migrate: bool) -> Result<(), String> {
     let target = library_root_from_selection(&target)?;
     if migrate && target != inner.root {
         fs::create_dir_all(&target).map_err(error)?;
-        for name in ["knowledge.json", "knowledge.json.bak", "source"] {
+        for name in [
+            "knowledge.db",
+            "knowledge.json",
+            "knowledge.json.bak",
+            "knowledge.json.migrated-v8.bak",
+            "source",
+        ] {
             let source = inner.root.join(name);
             let destination = target.join(name);
             if source.exists() && !destination.exists() {
@@ -749,6 +739,15 @@ pub fn delete_topic(inner: &mut Inner, id: Uuid) -> Result<(), String> {
         .data
         .document_topics
         .retain(|item| !removed.contains(&item.topic_id));
+    inner
+        .data
+        .topic_summaries
+        .retain(|summary| !removed.contains(&summary.topic_id));
+    for conversation in &mut inner.data.conversations {
+        conversation
+            .topic_ids
+            .retain(|topic_id| !removed.contains(topic_id));
+    }
     save_data(&inner.root, &inner.data)
 }
 
@@ -1292,6 +1291,101 @@ pub fn chunks(text: &str, size: usize, overlap: usize) -> Vec<String> {
     values
 }
 
+fn is_front_matter_noise(line: &str) -> bool {
+    let lower = line.to_lowercase();
+    lower.contains("arxiv:")
+        || lower.starts_with("published as ")
+        || lower.contains("technical report")
+        || lower.starts_with("http://")
+        || lower.starts_with("https://")
+        || line.starts_with('(')
+        || Regex::new(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}$")
+            .unwrap()
+            .is_match(line)
+}
+
+fn is_affiliation_line(line: &str) -> bool {
+    let lower = line.to_lowercase();
+    line.contains('@')
+        || [
+            "university",
+            "institute",
+            "department",
+            "laboratory",
+            "school of",
+            "research lab",
+            "csail",
+        ]
+        .iter()
+        .any(|marker| lower.contains(marker))
+        || matches!(line, "NVIDIA" | "MIT" | "Google" | "Microsoft Research")
+}
+
+fn is_cjk(character: char) -> bool {
+    matches!(character, '\u{3400}'..='\u{4dbf}' | '\u{4e00}'..='\u{9fff}')
+}
+
+fn looks_like_name_fragment(value: &str) -> bool {
+    let words: Vec<_> = value
+        .split_whitespace()
+        .map(|word| word.trim_matches(|character: char| !character.is_alphanumeric()))
+        .filter(|word| !word.is_empty() && !matches!(*word, "and" | "&"))
+        .collect();
+    if words.is_empty() || words.len() > 5 {
+        return false;
+    }
+    words.iter().all(|word| {
+        !word.chars().any(|character| character.is_ascii_digit())
+            && word.chars().any(char::is_alphabetic)
+            && word
+                .chars()
+                .find(|character| character.is_alphabetic())
+                .is_some_and(|character| character.is_uppercase() || is_cjk(character))
+    })
+}
+
+fn looks_like_author_line(line: &str) -> bool {
+    if is_front_matter_noise(line) || is_affiliation_line(line) || line.contains(':') {
+        return false;
+    }
+    let lower = line.to_lowercase();
+    if lower.ends_with(" team") {
+        return true;
+    }
+    let letters: Vec<_> = line
+        .chars()
+        .filter(|character| character.is_alphabetic())
+        .collect();
+    if !letters.is_empty() && letters.iter().all(|character| character.is_uppercase()) {
+        return false;
+    }
+    if line.contains(',') || line.contains(';') {
+        return line
+            .split([',', ';'])
+            .filter(|part| looks_like_name_fragment(part.trim()))
+            .take(2)
+            .count()
+            >= 2;
+    }
+    if lower.contains(" and ") {
+        return line
+            .split(" and ")
+            .all(|part| looks_like_name_fragment(part.trim()));
+    }
+    looks_like_name_fragment(line) && line.split_whitespace().count() >= 2
+}
+
+fn clean_author_line(line: &str) -> String {
+    line.replace(
+        [
+            '∗', '⋆', '†', '‡', '¹', '²', '³', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹',
+        ],
+        "",
+    )
+    .trim()
+    .to_string()
+}
+
 fn paper_title_and_authors(extracted: &ExtractedDocument) -> Option<(String, Vec<String>)> {
     let source = extracted
         .pages
@@ -1307,44 +1401,79 @@ fn paper_title_and_authors(extracted: &ExtractedDocument) -> Option<(String, Vec
     if !source.to_lowercase().contains("abstract") && !source.contains("摘要") {
         return None;
     }
-    let title = lines.iter().take(12).find(|line| {
-        line.len() >= 12 && line.len() <= 300 && !line.to_lowercase().contains("arxiv")
-    })?;
-    let title_index = lines.iter().position(|line| line == title).unwrap_or(0);
     let abstract_index = lines
         .iter()
         .position(|line| {
             let lower = line.to_lowercase();
-            lower == "abstract" || lower.starts_with("abstract ") || line.starts_with("摘要")
+            lower.starts_with("abstract") || line.starts_with("摘要")
         })
         .unwrap_or(lines.len());
-    let authors_start = title_index.saturating_add(1).min(lines.len());
-    let authors_end = abstract_index.max(authors_start).min(lines.len());
-    let authors = lines[authors_start..authors_end]
+    let front = &lines[..abstract_index];
+    let title_start = front
         .iter()
-        .copied()
-        .filter(|line| {
-            let lower = line.to_lowercase();
-            !line.contains('@')
-                && ![
-                    "university",
-                    "institute",
-                    "department",
-                    "laboratory",
-                    "school of",
-                ]
-                .iter()
-                .any(|marker| lower.contains(marker))
-        })
-        .take(4)
-        .map(str::to_string)
-        .collect();
-    Some(((*title).to_string(), authors))
+        .position(|line| !is_front_matter_noise(line) && !is_affiliation_line(line))?;
+    let mut title_lines = vec![front[title_start].to_string()];
+    let mut authors = vec![];
+    for line in &front[title_start + 1..] {
+        if is_front_matter_noise(line) || is_affiliation_line(line) {
+            continue;
+        }
+        if looks_like_author_line(line) {
+            authors.push(clean_author_line(line));
+        } else if authors.is_empty() && title_lines.len() < 3 {
+            title_lines.push((*line).to_string());
+        }
+    }
+    Some((title_lines.join(" "), authors))
 }
 
 fn paper_display_name(extracted: &ExtractedDocument) -> Option<String> {
     let (title, authors) = paper_title_and_authors(extracted)?;
     let author = authors.first().map(String::as_str).unwrap_or("");
+    if author.to_lowercase().ends_with(" team") {
+        return Some(format!("{author}, {title}"));
+    }
+    let surname = author
+        .split([',', ';'])
+        .next()
+        .unwrap_or("")
+        .split_whitespace()
+        .last()
+        .unwrap_or("")
+        .trim_matches(|character: char| !character.is_alphanumeric());
+    if surname.is_empty() {
+        Some(title)
+    } else if authors.len() > 1
+        || author.contains(',')
+        || author.contains(';')
+        || author.to_lowercase().contains(" and ")
+    {
+        Some(format!("{surname} et al., {title}"))
+    } else {
+        Some(format!("{surname}, {title}"))
+    }
+}
+
+fn legacy_paper_display_name(extracted: &ExtractedDocument) -> Option<String> {
+    let source = extracted
+        .pages
+        .first()
+        .map(|page| page.text.as_str())
+        .unwrap_or(&extracted.text);
+    let lines: Vec<_> = source
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .take(12)
+        .collect();
+    if !source.to_lowercase().contains("abstract") && !source.contains("摘要") {
+        return None;
+    }
+    let title = lines.iter().find(|line| {
+        line.len() >= 12 && line.len() <= 300 && !line.to_lowercase().contains("arxiv")
+    })?;
+    let title_index = lines.iter().position(|line| line == title).unwrap_or(0);
+    let author = lines.get(title_index + 1).copied().unwrap_or("");
     let surname = author
         .split([',', ';'])
         .next()
@@ -1354,7 +1483,7 @@ fn paper_display_name(extracted: &ExtractedDocument) -> Option<String> {
         .unwrap_or("")
         .trim_matches(|character: char| character.is_ascii_punctuation());
     if surname.is_empty() {
-        Some(title)
+        Some((*title).to_string())
     } else if author.contains(',')
         || author.contains(';')
         || author.to_lowercase().contains(" and ")
@@ -1532,7 +1661,11 @@ pub fn migrate_document_filenames(root: &Path, data: &mut KnowledgeData) -> Resu
         let destination = root.join(&relative);
         if current != destination {
             match (current.exists(), destination.exists()) {
-                (true, false) => fs::rename(&current, &destination).map_err(error)?,
+                (true, false) => {
+                    if fs::rename(&current, &destination).is_err() {
+                        continue;
+                    }
+                }
                 (false, true) => {}
                 _ => continue,
             }
@@ -1546,9 +1679,6 @@ pub fn migrate_document_filenames(root: &Path, data: &mut KnowledgeData) -> Resu
 pub fn migrate_document_authors(root: &Path, data: &mut KnowledgeData) -> bool {
     let mut changed = false;
     for document in &mut data.documents {
-        if !document.authors.is_empty() {
-            continue;
-        }
         let extracted = read_extracted(root, document.id);
         let extension = document.extension_name.trim_start_matches('.');
         let bytes = if matches!(extension, "html" | "htm") {
@@ -1560,9 +1690,28 @@ pub fn migrate_document_authors(root: &Path, data: &mut KnowledgeData) -> bool {
             vec![]
         };
         let authors = extract_authors(extension, &bytes, &extracted);
-        if !authors.is_empty() {
+        if document.authors != authors {
             document.authors = authors;
             changed = true;
+        }
+        if extension == "pdf" {
+            let legacy_name = legacy_paper_display_name(&extracted);
+            let detected_name = paper_display_name(&extracted);
+            let current = document.display_name.as_deref();
+            let team_misnamed = current.is_some_and(|value| {
+                value.to_lowercase().starts_with("team et al.,")
+                    && document
+                        .authors
+                        .first()
+                        .is_some_and(|author| author.to_lowercase().ends_with(" team"))
+            });
+            if detected_name.is_some()
+                && (current.is_none() || current == legacy_name.as_deref() || team_misnamed)
+                && document.display_name != detected_name
+            {
+                document.display_name = detected_name;
+                changed = true;
+            }
         }
     }
     changed
@@ -1721,6 +1870,89 @@ mod tests {
     }
 
     #[test]
+    fn paper_metadata_handles_multiline_titles_headers_and_team_authors() {
+        let cases = [
+            (
+                "arXiv:2602.15763v2 [cs.LG] 24 Feb 2026\nGLM-5: from Vibe Coding to Agentic Engineering\nGLM-5 Team\nZhipu AI & Tsinghua University\n(For the complete list of authors, please refer to the Contribution section)\nAbstract\nBody",
+                "GLM-5 Team, GLM-5: from Vibe Coding to Agentic Engineering",
+                "GLM-5 Team",
+            ),
+            (
+                "2026-1-27\nLatentMoE: Toward Optimal Accuracy per FLOP\nand Parameter in Mixture of Experts\nVenmugil Elango, Nidhi Bhatia, Roger Waleffe, Rasoul Shafipour, Tomer\nAsida, Abhinav Khattar, Nave Assaf, Maximilian Golub, Joey Guman\narXiv:2601.18089v1 [cs.LG] 26 Jan 2026\nAbstract. Body",
+                "Elango et al., LatentMoE: Toward Optimal Accuracy per FLOP and Parameter in Mixture of Experts",
+                "Venmugil Elango",
+            ),
+            (
+                "arXiv:2412.06464v3 [cs.CL] 6 Mar 2025\nPublished as a conference paper at ICLR 2025\nGATED DELTA NETWORKS:\nIMPROVING MAMBA2 WITH DELTA RULE\nSonglin Yang∗\nMIT CSAIL\nyangsl66@mit.edu\nJan Kautz\nNVIDIA\nABSTRACT\nBody",
+                "Yang et al., GATED DELTA NETWORKS: IMPROVING MAMBA2 WITH DELTA RULE",
+                "Songlin Yang",
+            ),
+            (
+                "KIMI K3: OPEN FRONTIER INTELLIGENCE\nTECHNICAL REPORT OF KIMI K3\nKimi Team\nAbstract\nBody",
+                "Kimi Team, KIMI K3: OPEN FRONTIER INTELLIGENCE",
+                "Kimi Team",
+            ),
+        ];
+        for (source, expected_name, expected_author) in cases {
+            let extracted = ExtractedDocument {
+                text: source.into(),
+                pages: vec![ExtractedPage {
+                    number: 1,
+                    text: source.into(),
+                }],
+            };
+            let (_, authors) = paper_title_and_authors(&extracted).unwrap();
+            assert!(authors.first().unwrap().contains(expected_author));
+            assert_eq!(
+                paper_display_name(&extracted).as_deref(),
+                Some(expected_name)
+            );
+        }
+    }
+
+    #[test]
+    fn metadata_migration_repairs_legacy_kimi_author_name() {
+        let root = std::env::temp_dir()
+            .join("KnowledgeMaster-tests")
+            .join(Uuid::new_v4().to_string());
+        prepare_directories(&root).unwrap();
+        let id = Uuid::new_v4();
+        let extracted = ExtractedDocument {
+            text: "KIMI K3: OPEN FRONTIER INTELLIGENCE\nTECHNICAL REPORT OF KIMI K3\nKimi Team\nAbstract\nBody".into(),
+            pages: vec![],
+        };
+        fs::write(
+            index_dir(&root).join(format!("{id}.json")),
+            serde_json::to_vec(&extracted).unwrap(),
+        )
+        .unwrap();
+        let mut data = KnowledgeData::default();
+        data.documents.push(KnowledgeDocument {
+            id,
+            name: "2607.24653.pdf".into(),
+            display_name: Some("K3, KIMI K3: OPEN FRONTIER INTELLIGENCE".into()),
+            authors: vec!["TECHNICAL REPORT OF KIMI K3".into()],
+            extension_name: ".pdf".into(),
+            size: 1,
+            sha256: "digest".into(),
+            stored_path: None,
+            imported_at: now(),
+            status: "ready".into(),
+            page_count: Some(1),
+            error: None,
+            source_url: None,
+        });
+
+        assert!(migrate_document_authors(&root, &mut data));
+        assert_eq!(data.documents[0].authors, vec!["Kimi Team"]);
+        assert_eq!(
+            data.documents[0].display_name.as_deref(),
+            Some("Kimi Team, KIMI K3: OPEN FRONTIER INTELLIGENCE")
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn refresh_imports_manual_files_and_author_search_finds_them() {
         let root = std::env::temp_dir()
             .join("KnowledgeMaster-tests")
@@ -1837,6 +2069,35 @@ mod tests {
             data: KnowledgeData::default(),
             settings: AppSettings::default(),
         };
+        inner.data.documents.push(KnowledgeDocument {
+            id: document_id,
+            name: "paper.pdf".into(),
+            display_name: None,
+            authors: vec![],
+            extension_name: ".pdf".into(),
+            size: 1,
+            sha256: "hash".into(),
+            stored_path: None,
+            imported_at: now(),
+            status: "ready".into(),
+            page_count: None,
+            error: None,
+            source_url: None,
+        });
+        inner.data.topics = vec![
+            Topic {
+                id: removed_topic,
+                name: "移出".into(),
+                parent_id: None,
+                created_at: now(),
+            },
+            Topic {
+                id: retained_topic,
+                name: "保留".into(),
+                parent_id: None,
+                created_at: now(),
+            },
+        ];
         inner.data.document_topics = vec![
             DocumentTopic {
                 document_id,

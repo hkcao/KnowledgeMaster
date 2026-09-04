@@ -1,5 +1,6 @@
 mod agent;
 mod ai;
+mod database;
 mod export;
 mod models;
 mod store;
@@ -393,6 +394,30 @@ fn document_payload(state: State<'_, AppState>, id: Uuid) -> Result<ReaderDocume
     store::reader_payload(&inner, id)
 }
 
+fn annotation_rects_overlap(left: &AnnotationRect, right: &AnnotationRect) -> bool {
+    if left.page != right.page {
+        return false;
+    }
+    let width = (left.x + left.width).min(right.x + right.width) - left.x.max(right.x);
+    let height = (left.y + left.height).min(right.y + right.height) - left.y.max(right.y);
+    width > 0.5 && height > 0.5
+}
+
+fn overlapping_annotation<'a>(
+    annotations: &'a [KnowledgeAnnotation],
+    document_id: Uuid,
+    rects: &[AnnotationRect],
+) -> Option<&'a KnowledgeAnnotation> {
+    annotations.iter().find(|annotation| {
+        annotation.document_id == document_id
+            && annotation.rects.iter().any(|existing| {
+                rects
+                    .iter()
+                    .any(|candidate| annotation_rects_overlap(existing, candidate))
+            })
+    })
+}
+
 #[tauri::command]
 fn add_annotation(
     state: State<'_, AppState>,
@@ -406,7 +431,11 @@ fn add_annotation(
     if !matches!(kind.as_str(), "highlight" | "underline" | "note") {
         return Err("批注类型无效".into());
     }
+    let rects = normalize_annotation_rects(rects);
     let mut inner = state.inner.lock().map_err(error)?;
+    if overlapping_annotation(&inner.data.annotations, document_id, &rects).is_some() {
+        return Err("所选区域已有批注，请点击已有高亮添加笔记或删除".into());
+    }
     let timestamp = now();
     inner.data.annotations.push(KnowledgeAnnotation {
         id: Uuid::new_v4(),
@@ -758,6 +787,70 @@ pub fn run() {
 mod tests {
     use super::*;
 
+    #[test]
+    fn overlapping_pdf_annotations_are_rejected_but_adjacent_lines_are_allowed() {
+        let document_id = Uuid::new_v4();
+        let existing_rect = AnnotationRect {
+            page: 1,
+            x: 10.0,
+            y: 20.0,
+            width: 50.0,
+            height: 10.0,
+        };
+        let timestamp = now();
+        let annotations = vec![KnowledgeAnnotation {
+            id: Uuid::new_v4(),
+            document_id,
+            page: Some(1),
+            quote: "existing".into(),
+            kind: "highlight".into(),
+            note: String::new(),
+            rects: vec![existing_rect.clone()],
+            created_at: timestamp.clone(),
+            updated_at: timestamp,
+        }];
+        let overlap = AnnotationRect {
+            page: 1,
+            x: 40.0,
+            y: 22.0,
+            width: 30.0,
+            height: 8.0,
+        };
+        let adjacent = AnnotationRect {
+            page: 1,
+            x: 10.0,
+            y: 31.0,
+            width: 30.0,
+            height: 8.0,
+        };
+        assert!(annotation_rects_overlap(&existing_rect, &overlap));
+        assert!(!annotation_rects_overlap(&existing_rect, &adjacent));
+        assert!(overlapping_annotation(&annotations, document_id, &[overlap]).is_some());
+        assert!(overlapping_annotation(&annotations, document_id, &[adjacent]).is_none());
+    }
+
+    #[test]
+    fn backend_normalizes_duplicate_pdf_selection_rectangles() {
+        let rects = normalize_annotation_rects(vec![
+            AnnotationRect {
+                page: 1,
+                x: 10.0,
+                y: 20.0,
+                width: 40.0,
+                height: 10.0,
+            },
+            AnnotationRect {
+                page: 1,
+                x: 10.1,
+                y: 20.1,
+                width: 39.8,
+                height: 9.8,
+            },
+        ]);
+        assert_eq!(rects.len(), 1);
+        assert_eq!(rects[0].x, 10.0);
+        assert_eq!(rects[0].width, 40.0);
+    }
     #[test]
     fn web_urls_accept_host_and_reject_non_web_schemes() {
         assert_eq!(
