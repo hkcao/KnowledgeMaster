@@ -32,34 +32,19 @@
 - GitHub：`https://github.com/hkcao/KnowledgeMaster`
 - 仓库：Public，MIT License
 - 当前分支：`main`
-- 当前 HEAD：`78b4b95b6a5d9a40fa9327839510321411d715af`
-- HEAD 提交：`feat: migrate metadata to sqlite and fix annotations`
+- 当前代码/清理基线：`9f4587fc46b978ccb1f0de0c6841399f6e3d3cb8`
+- 基线提交：`chore: remove legacy native macOS implementation`
 - 当前正式版本/标签：`v0.2.5`
-- `origin/main`、本地 `main` 和 `v0.2.5` 在交接时都指向上述提交。
+- 本地 `main` 和 `origin/main` 已包含上述清理提交；`v0.2.5` 标签仍停在此前的 `78b4b95b6a5d9a40fa9327839510321411d715af`。
+- 本节自身会通过紧随清理提交的文档提交同步到 `origin/main`；精确最新 HEAD 请以 `git rev-parse HEAD` 和 `git ls-remote origin refs/heads/main` 为准。
 
-重要：工作区目前不是干净状态。共有一组已经暂存、但尚未提交和推送的目录整理变更：
+目录整理已经提交并推送：
 
 - 删除已废弃的 Swift/macOS 旧实现：`Package.swift`、`Sources/`、`Resources/`、`scripts/`、`tests/KnowledgeMasterTests/`。
 - 修改 `.github/workflows/tauri-ci.yml`，macOS 从 `.app` ZIP 改为直接构建并发布 `.dmg`。
 - 更新 `README.md`、`README.en.md` 和 `docs/REPLICATION_PROMPT.md`，移除旧原生实现/迁移表述并统一为 DMG 安装说明。
-- 目录整理差异（不含本文档）共 59 个文件，约 13 行新增、7757 行删除；把本文档加入暂存区后会显示为 60 个文件。
-
-不要直接丢弃这些变更。新窗口开始后先执行：
-
-```bash
-cd /Users/hank/Desktop/知识整理器
-git status --short
-git diff --cached --check
-git diff --cached --stat
-```
-
-建议提交信息：
-
-```text
-chore: remove legacy macOS implementation and publish dmg
-```
-
-是否提交、推送或发布新版本需要遵循用户当时的明确指令；本次交接前没有替用户提交这组整理变更。
+- 清理提交共 60 个文件，273 行新增、7757 行删除，其中包含首次加入的本文档。
+- 提交前 `git diff --cached --check` 通过；推送后仍需以 GitHub Actions 结果区分“源码已推送”和“安装包已发布”。
 
 ## 3. 已发布状态与待发布差异
 
@@ -71,7 +56,7 @@ chore: remove legacy macOS implementation and publish dmg
 - `KnowledgeMaster-portable.exe`
 - `KnowledgeMaster_0.2.5_x64-setup.exe`
 
-本地待提交 CI 已不再生成 macOS ZIP，改为：
+已推送的 CI 配置不再生成 macOS ZIP，改为：
 
 ```yaml
 - macOS runner: npm run tauri build -- --bundles dmg
@@ -107,7 +92,7 @@ chore: remove legacy macOS implementation and publish dmg
 
 清理前这些内容约占 10GB。当前源码本身不足 1MB；目录仍约 1.1GB，几乎全部来自 `.git/objects` 的可达历史。没有重写历史或执行激进 Git 清理，以免破坏标签、分支或尚未合并的历史。
 
-因为依赖和构建目录已删除，新窗口首次测试前需要重新安装/构建：
+因为依赖和构建目录已删除，新窗口首次测试前需要重新安装/构建；验证完成后可再次删除这些被忽略的产物：
 
 ```bash
 npm ci
@@ -117,16 +102,18 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 ## 5. 最近一次本地验证结果
 
-在清除缓存之前，当前 Tauri 源码和目录整理变更已完成以下验证：
+当前 Tauri 源码和目录整理变更已完成以下验证：
 
-- `npm test`：1 个测试文件，12 项测试通过。
+- 2026-09-05 提交前重新执行 `npm test`：1 个测试文件，12 项测试通过。
+- 2026-09-05 提交前重新执行 `npm run build`：通过；Vite 仅提示主 bundle 大于 500kB。
 - `cargo test --manifest-path src-tauri/Cargo.toml`：28 项 Rust 测试通过。
-- `npm run build`：通过；Vite 仅提示主 bundle 大于 500kB。
 - `npm run tauri build -- --bundles dmg`：成功生成 `知屿 KnowledgeMaster_0.2.5_aarch64.dmg`。
 - `hdiutil verify`：DMG 校验有效。
 - DMG 构建需要调用 macOS `hdiutil`；受限沙箱中脚本可能失败，允许系统级构建后可以成功。
 
 构建产物随后按目录清理要求删除，当前本地不再保留该 DMG。
+
+本次恢复依赖时，直接执行 `npm ci` 因 `~/.npm` 含历史 root-owned 缓存文件而报 `EPERM`。未修改用户目录权限，改用 `npm ci --cache /tmp/knowledgemaster-npm-cache` 后成功；测试结束后重新删除了 `node_modules/`、`dist/` 和临时缓存。
 
 严格执行 `cargo clippy --all-targets -- -D warnings` 时，仓库在此前检查中仍有 5 条既有 warning（位于 `ai.rs`、`store.rs`、`lib.rs` 的旧代码）。它们不是 SQLite/批注修改引入的，但如果后续把 Clippy 加入 CI，需要先单独处理。
 
@@ -230,7 +217,7 @@ Copy-Item src-tauri\target\release\knowledge-master.exe KnowledgeMaster-portable
 
 GitHub Actions 文件：`.github/workflows/tauri-ci.yml`
 
-- macOS runner：测试并构建 DMG（当前仅本地待提交配置）。
+- macOS runner：测试并构建 DMG。
 - Windows runner：测试并构建 NSIS，同时复制免安装 `KnowledgeMaster-portable.exe`。
 - `v*` 标签：下载平台 artifact，创建或更新同名 GitHub Release，并上传全部文件。
 - 应用未做 Apple 公证或 Windows 代码签名；README 已说明首次打开方式。
@@ -247,7 +234,7 @@ GitHub Actions 文件：`.github/workflows/tauri-ci.yml`
 
 工程级下一步：
 
-1. 先审查并提交当前目录清理、DMG 和交接文档变更。
+1. 查看清理提交后的 GitHub Actions 结果，区分源码推送成功与构建流水线成功。
 2. 若用户要求线上 DMG，建议统一升版到 `v0.2.6`，由标签流水线发布，不移动 `v0.2.5` 标签。
 3. 发布后用 `gh release view <tag> --json assets,url` 确认 macOS 附件是 `.dmg`，且 Windows 便携版和安装版仍存在。
 4. 若 GitHub Actions 的 macOS DMG 脚本失败，先看 `hdiutil`/挂载错误；本机已证明 Tauri 配置本身可以生成有效 DMG。
@@ -257,4 +244,4 @@ GitHub Actions 文件：`.github/workflows/tauri-ci.yml`
 
 可以把下面内容作为新窗口的第一条消息：
 
-> 请先阅读 `/Users/hank/Desktop/知识整理器/docs/HANDOFF.md`，并遵循当前窗口提供的 `AGENTS.md` 指令。核对 `git status`、当前分支和暂存差异后继续工作。不要丢弃现有的目录清理和 macOS DMG 发布修改；任何提交、推送或发布动作按我当前请求的范围执行。
+> 请先阅读 `/Users/hank/Desktop/知识整理器/docs/HANDOFF.md`，并遵循当前窗口提供的 `AGENTS.md` 指令。核对 `git status`、当前分支、远端 HEAD、GitHub Actions 和 Release 后继续工作；任何提交、推送或发布动作按我当前请求的范围执行。
