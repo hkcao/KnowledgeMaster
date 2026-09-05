@@ -1,7 +1,6 @@
 # 知屿 KnowledgeMaster 精确复刻 Prompt
 
-> 基线：`agent/native-macos-only` 分支提交 `9754b7ed6dcc8ebcdaa84821f33050e813acae5e`。
-> 本规格从实际 SwiftUI/AppKit/PDFKit 源码和 70 个回归测试整理，不以产品设想代替已实现行为。
+> 本规格以当前 Tauri、React 和 Rust 实现及其自动化测试为准，不以产品设想代替已实现行为。
 
 ## 1. 你的角色与交付目标
 
@@ -557,9 +556,9 @@ Claude Code 使用 stream-json、verbose、hook events、默认工具和用户�
 - `npm test` 通过；
 - `npm run build` 通过；
 - Rust 单元测试通过；
-- `tauri build` 能产出 macOS `.app`；
+- `tauri build` 能产出 macOS `.dmg`；
 - Windows CI 或 Windows 开发机上的 `tauri build` 能产出 `.msi`/NSIS 安装包；若当前机器无法执行，至少提供 CI 矩阵和无 macOS 专属编译依赖的条件编译证明；
 - 人工验证拖放导入、PDF 选择工具条、缩放、批注气泡、聊天滚动、IME 回车、侧栏隐藏恢复和设置懒读取；
 - README 写清开发、构建、数据目录、安全边界和已知限制；
 - 不保留“稍后实现”的空按钮；
-- 对因 Tauri/WebView 与 PDFKit 差异而无法完全同构的细节，必须在 README 的迁移差异中明确说明并提供等价交互。
+- README 写清 macOS 与 Windows 的平台差异和等价交互。

@@ -18,7 +18,7 @@ jobs:
         include:
           - name: macOS
             os: macos-14
-            bundle: app
+            bundle: dmg
           - name: Windows
             os: windows-2022
             bundle: nsis
@@ -41,16 +41,13 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: Copy-Item src-tauri/target/release/knowledge-master.exe KnowledgeMaster-portable.exe
-      - name: Prepare macOS application archive
-        if: runner.os == 'macOS'
-        run: ditto -c -k --sequesterRsrc --keepParent "src-tauri/target/release/bundle/macos/知屿 KnowledgeMaster.app" KnowledgeMaster-macOS.zip
       - name: Upload macOS package
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
           name: KnowledgeMaster-macOS
           if-no-files-found: error
-          path: KnowledgeMaster-macOS.zip
+          path: src-tauri/target/release/bundle/dmg/*.dmg
       - name: Upload Windows packages
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4

@@ -58,7 +58,7 @@
 | WebView | 系统 WebKit | WebView2 |
 | 凭据 | Keychain | Credential Manager |
 | Agent 终止 | 终止进程 | `taskkill /T` 终止进程树 |
-| 发布包 | `.app` / `.dmg` | 便携版 `.exe` / NSIS 安装版 `.exe` |
+| 发布包 | `.dmg` | 便携版 `.exe` / NSIS 安装版 `.exe` |
 
 共享技术栈：
 
@@ -75,7 +75,7 @@
 ### Windows
 
 1. 在 [GitHub Releases](https://github.com/hkcao/KnowledgeMaster/releases) 下载 `KnowledgeMaster-portable.exe`。这是免安装版本，放在任意普通目录后双击即可运行。
-2. 如果希望自动创建开始菜单入口，也可以下载文件名以 `-setup.exe` 结尾的 NSIS 安装版。不要下载 macOS 的 `.dmg` 或 `.app`。
+2. 如果希望自动创建开始菜单入口，也可以下载文件名以 `-setup.exe` 结尾的 NSIS 安装版。不要下载 macOS 的 `.dmg`。
 3. 便携版依赖系统 WebView2。较新的 Windows 10/11 通常已经自带；如果程序无法打开，请先安装 Microsoft Edge WebView2 Runtime。安装版会在缺失时联网补充安装。
 4. 未签名版本可能触发 Windows SmartScreen；请先确认文件来自本仓库的 Release，再选择“更多信息 → 仍要运行”。
 5. 第一次启动后，在“设置”中选择资料库目录。需要多设备同步时，可以选择 OneDrive 内的目录，但不要让两台设备同时修改同一个资料库。
@@ -85,7 +85,7 @@
 
 ### macOS
 
-从 [GitHub Releases](https://github.com/hkcao/KnowledgeMaster/releases) 下载 `.dmg` 或 `.app`，拖入“应用程序”后启动。未经过 Apple 公证的版本首次打开时，需要在“系统设置 → 隐私与安全性”中确认允许打开。
+从 [GitHub Releases](https://github.com/hkcao/KnowledgeMaster/releases) 下载 `.dmg`，打开后把知屿拖入“应用程序”并启动。未经过 Apple 公证的版本首次打开时，需要在“系统设置 → 隐私与安全性”中确认允许打开。
 
 ## 从源码编译
 
@@ -145,7 +145,7 @@ npm run tauri build -- --bundles app,dmg
 
 构建结果位于 `src-tauri/target/release/bundle/macos/` 与 `src-tauri/target/release/bundle/dmg/`。
 
-macOS 与 Windows 的正式安装包应在各自系统上构建。仓库提供 `.github/workflows/tauri-ci.yml`，会在两种系统上分别运行前端测试、Rust 测试，并验证 macOS `.app` 与 Windows NSIS `.exe` 构建。
+macOS 与 Windows 的正式安装包应在各自系统上构建。仓库提供 `.github/workflows/tauri-ci.yml`，会在两种系统上分别运行前端测试、Rust 测试，并验证 macOS `.dmg`、Windows 便携版和 NSIS `.exe` 构建。
 
 ## 本地资料结构
 

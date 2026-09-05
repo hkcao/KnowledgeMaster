@@ -58,7 +58,7 @@ KnowledgeMaster brings paper collection, close reading and annotation, research 
 | WebView | System WebKit | WebView2 |
 | Credentials | Keychain | Credential Manager |
 | Agent termination | Terminate the process | Terminate the process tree with `taskkill /T` |
-| Release packages | `.app` / `.dmg` | Portable `.exe` / NSIS installer `.exe` |
+| Release packages | `.dmg` | Portable `.exe` / NSIS installer `.exe` |
 
 Shared stack:
 
@@ -75,7 +75,7 @@ KnowledgeMaster does not use Electron, require a hosted application backend, or 
 ### Windows
 
 1. Download `KnowledgeMaster-portable.exe` from [GitHub Releases](https://github.com/hkcao/KnowledgeMaster/releases). It is a portable build: put it in a normal folder and double-click it to run.
-2. To create Start menu shortcuts, download the NSIS package whose filename ends in `-setup.exe`. Do not download the macOS `.dmg` or `.app` package.
+2. To create Start menu shortcuts, download the NSIS package whose filename ends in `-setup.exe`. Do not download the macOS `.dmg` package.
 3. The portable build requires WebView2. Recent Windows 10/11 installations normally include it. If the application does not start, install Microsoft Edge WebView2 Runtime first. The installer build can bootstrap a missing runtime over the network.
 4. Unsigned releases may trigger Windows SmartScreen. Verify that the file came from this repository's Release page, then choose **More info > Run anyway**.
 5. On first launch, choose a library directory in Settings. For cross-device synchronization, you may choose a OneDrive directory, but do not modify the same library from two computers at the same time.
@@ -85,7 +85,7 @@ If a Release does not yet contain a Windows package, build it from source with t
 
 ### macOS
 
-Download the `.dmg` or `.app` archive from [GitHub Releases](https://github.com/hkcao/KnowledgeMaster/releases), move the application into Applications, and launch it. Because current builds are not Apple-notarized, macOS may require approval under **System Settings > Privacy & Security** the first time you open the app.
+Download the `.dmg` from [GitHub Releases](https://github.com/hkcao/KnowledgeMaster/releases), open it, drag KnowledgeMaster into Applications, and launch it. Because current builds are not Apple-notarized, macOS may require approval under **System Settings > Privacy & Security** the first time you open the app.
 
 ## Build from Source
 
@@ -145,7 +145,7 @@ npm run tauri build -- --bundles app,dmg
 
 Build outputs are written to `src-tauri/target/release/bundle/macos/` and `src-tauri/target/release/bundle/dmg/`.
 
-Production packages should be built on their target operating system. `.github/workflows/tauri-ci.yml` runs frontend and Rust tests on both macOS and Windows, builds a macOS app archive, and produces Windows portable and NSIS packages.
+Production packages should be built on their target operating system. `.github/workflows/tauri-ci.yml` runs frontend and Rust tests on both macOS and Windows, builds a macOS `.dmg`, and produces Windows portable and NSIS packages.
 
 ## Local Library Layout
 
