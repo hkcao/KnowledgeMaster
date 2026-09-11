@@ -17,11 +17,11 @@ import {
 import type { ChatMessage } from "./types";
 
 const message = (content: string): ChatMessage => ({
-  id: crypto.randomUUID(),
+  id: `message-${content}`,
   role: "user",
   content,
   quote: { text: "quote", documentId: "quoted", documentName: "paper.pdf" },
-  createdAt: new Date().toISOString()
+  createdAt: "2026-01-01T00:00:00.000Z"
 });
 
 describe("chat behavior", () => {
@@ -72,12 +72,16 @@ describe("chat behavior", () => {
     expect(pdfOutputScale(1.25, true)).toBe(1.5);
     expect(pdfOutputScale(2.5, true)).toBe(2);
     expect(pdfOutputScale(1, false)).toBe(1);
+    expect(pdfOutputScale(0, true)).toBe(1.5);
+    expect(pdfOutputScale(Number.NaN, false)).toBe(1);
   });
 
   it("fits a PDF page to the full available reader width", () => {
     expect(fitPDFScale(900, 600)).toBe(1.5);
     expect(fitPDFScale(1200, 600)).toBe(2);
     expect(fitPDFScale(100, 1000)).toBe(0.55);
+    expect(fitPDFScale(5000, 100)).toBe(4);
+    expect(fitPDFScale(0, 600)).toBe(1);
   });
 
   it("summarizes at most thirty unprocessed messages", () => {
@@ -86,6 +90,16 @@ describe("chat behavior", () => {
     conversation.messages = Array.from({ length: 40 }, (_, index) => message(String(index)));
     expect(pendingSummaryMessages(conversation)).toHaveLength(30);
     expect(pendingSummaryMessages(conversation)[0].content).toBe("2");
+  });
+
+  it("handles stale conversation summary counters", () => {
+    const conversation = newConversation();
+    conversation.messages = [message("0"), message("1")];
+    conversation.summaryMessageCount = 10;
+    expect(pendingSummaryMessages(conversation)).toEqual([]);
+
+    conversation.summaryMessageCount = -1;
+    expect(pendingSummaryMessages(conversation).map((item) => item.content)).toEqual(["0", "1"]);
   });
 });
 
@@ -119,6 +133,18 @@ describe("reader selection toolbar", () => {
     ])).toEqual([
       { page: 1, x: 10, y: 20, width: 61, height: 10 },
       { page: 1, x: 10, y: 40, width: 30, height: 10 }
+    ]);
+  });
+
+  it("filters invalid rectangles and never merges across pages", () => {
+    expect(normalizeAnnotationRects([
+      { page: 2, x: 10, y: 20, width: 20, height: 10 },
+      { page: 1, x: 10, y: 20, width: 20, height: 10 },
+      { page: 1, x: Number.NaN, y: 20, width: 20, height: 10 },
+      { page: 1, x: 10, y: 20, width: Number.POSITIVE_INFINITY, height: 10 }
+    ])).toEqual([
+      { page: 1, x: 10, y: 20, width: 20, height: 10 },
+      { page: 2, x: 10, y: 20, width: 20, height: 10 }
     ]);
   });
 });

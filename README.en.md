@@ -182,6 +182,15 @@ After selecting documents or topics, the app creates an isolated system temporar
 4. Visual polish and motion design can be improved further.
 5. Windows is a supported implementation and CI target, but trackpad, input-method, WebView2, and Agent CLI compatibility still require ongoing validation on real Windows devices.
 
+### Optimization Order
+
+1. **P0 · Context and caching**: measure candidate chunks, actual prompt content, cache hits, and summary coverage before adding context deduplication, a total token budget, and on-demand summarization. Citation recall on a fixed corpus must not regress.
+2. **P1 · Parsing and OCR**: run OCR only when a page has no text or unusually low text density. Key parsing caches by the source hash, extractor version, and language configuration, with regression fixtures for scanned pages, multi-column layouts, tables, and formulas.
+3. **P2 · Cross-conversation memory**: without introducing a vector database, store user-confirmed conclusions, action items, and provenance in local SQLite, then recall them with keyword, topic, and time filters. Memory must remain viewable, editable, deletable, and possible to disable.
+4. **Continuous · UI and Windows**: prioritize automated coverage for IME composition, modal stacking, PDF zoom and selection, and unavailable-Agent fallback. Continue real-device Windows validation for trackpads, Chinese IMEs, WebView2, PDF clarity, and `.cmd` Agent CLIs.
+
+This is an iteration order, not a claim that these limitations are complete. Each stage should establish reproducible tests and a measurable baseline before changing implementation.
+
 ## License
 
 Licensed under the [MIT License](LICENSE).

@@ -1810,6 +1810,52 @@ mod tests {
     }
 
     #[test]
+    fn chunk_cache_reuses_valid_data_and_rebuilds_stale_or_corrupt_data() {
+        let root = tempfile::tempdir().unwrap();
+        prepare_directories(root.path()).unwrap();
+        let mut document = KnowledgeDocument {
+            id: Uuid::new_v4(),
+            name: "paper.txt".into(),
+            display_name: None,
+            authors: vec![],
+            extension_name: ".txt".into(),
+            size: 1,
+            sha256: "digest-v1".into(),
+            stored_path: None,
+            imported_at: now(),
+            status: "ready".into(),
+            page_count: None,
+            error: None,
+            source_url: None,
+        };
+        let original = ExtractedDocument {
+            text: "original cached text".into(),
+            pages: vec![],
+        };
+        let changed = ExtractedDocument {
+            text: "changed extracted text".into(),
+            pages: vec![],
+        };
+
+        let first = read_or_build_chunk_cache(root.path(), &document, &original);
+        let reused = read_or_build_chunk_cache(root.path(), &document, &changed);
+        assert_eq!(reused.chunks[0].text, first.chunks[0].text);
+
+        document.sha256 = "digest-v2".into();
+        let rebuilt = read_or_build_chunk_cache(root.path(), &document, &changed);
+        assert_eq!(rebuilt.source_sha256, "digest-v2");
+        assert_eq!(rebuilt.chunks[0].text, "changed extracted text");
+
+        fs::write(chunk_cache_path(root.path(), document.id), b"not-json").unwrap();
+        let recovered = read_or_build_chunk_cache(root.path(), &document, &original);
+        assert_eq!(recovered.chunks[0].text, "original cached text");
+        let repaired: ChunkCache =
+            serde_json::from_slice(&fs::read(chunk_cache_path(root.path(), document.id)).unwrap())
+                .unwrap();
+        assert_eq!(repaired.chunks[0].text, "original cached text");
+    }
+
+    #[test]
     fn selected_quote_recalls_its_chunk_and_builds_cache_lazily() {
         let root = std::env::temp_dir()
             .join("KnowledgeMaster-tests")

@@ -117,7 +117,14 @@ export function selectionToolbarPosition(
 
 export function normalizeAnnotationRects(rects: AnnotationRect[]): AnnotationRect[] {
   const normalized = rects
-    .filter((rect) => Number.isFinite(rect.x) && Number.isFinite(rect.y) && rect.width > 0.5 && rect.height > 0.5)
+    .filter((rect) =>
+      Number.isFinite(rect.x)
+      && Number.isFinite(rect.y)
+      && Number.isFinite(rect.width)
+      && Number.isFinite(rect.height)
+      && rect.width > 0.5
+      && rect.height > 0.5
+    )
     .map((rect) => ({ ...rect }))
     .sort((left, right) => left.page - right.page || left.y - right.y || left.x - right.x);
   const merged: AnnotationRect[] = [];
