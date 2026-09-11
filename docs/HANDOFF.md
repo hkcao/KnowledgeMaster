@@ -31,10 +31,11 @@
 - 本地目录：`/Users/hank/Desktop/知识整理器`
 - GitHub：`https://github.com/hkcao/KnowledgeMaster`
 - 仓库：Public，MIT License
-- 当前分支：`tauri-codex`；已从 `23b3dfea` 安全快进到当前 `main` 基线后承载本轮发布候选。
-- 当前 HEAD：`ab4ff5a0dc8ccee994c51c2ea0d6afec3298c314`
-- HEAD 提交：`docs: update handoff after repository cleanup`
-- 当前公开正式版本/标签：`v0.2.5`；本地发布候选版本已同步为 `0.2.6`，尚未创建标签。
+- 当前分支：`tauri-codex`；已从 `23b3dfea` 安全快进到 `main` 基线并完成本轮发布。
+- 当前代码/发布提交：`c0a52f5f9f1b81c12c6f498bb61b7135c2cc4f86`
+- 发布提交：`release: prepare v0.2.6 Windows test build`
+- 当前公开正式版本/标签：`v0.2.6`
+- 2026-09-11 实时核验：远端 `refs/heads/tauri-codex` 和 `refs/tags/v0.2.6^{}` 都指向 `c0a52f5f`；本文档会通过紧随其后的 docs-only 提交同步发布结果，精确分支 tip 以 `git rev-parse HEAD` 为准。
 - 2026-09-11 实时核验：本地 `main`、本地 `origin/main` 和远端 `refs/heads/main` 都指向 `ab4ff5a0`。
 - `v0.2.5` 是 annotated tag，解引用后的发布提交为 `78b4b95b6a5d9a40fa9327839510321411d715af`。
 
@@ -48,15 +49,17 @@
 
 ## 3. 已发布状态与待发布差异
 
-当前公开 Release：<https://github.com/hkcao/KnowledgeMaster/releases/tag/v0.2.5>
+当前公开 Release：<https://github.com/hkcao/KnowledgeMaster/releases/tag/v0.2.6>
 
-2026-09-11 实时核验，`v0.2.5` 实际附件仍为：
+2026-09-11 实时核验，`v0.2.6` 为非草稿、非预发布版本，实际附件为：
 
-- `KnowledgeMaster-macOS.zip`
-- `KnowledgeMaster-portable.exe`
-- `KnowledgeMaster_0.2.5_x64-setup.exe`
+- `KnowledgeMaster-portable.exe`：22,312,448 bytes，SHA-256 `5853a98cd0a3969f997602695f49ac68ac4599ccad3e4ee50b821c0bcf4a509f`
+- `KnowledgeMaster_0.2.6_x64-setup.exe`：6,983,337 bytes，SHA-256 `41e43094016b8a47984518844ab57e3ee47bd099b82c7998170bfacf2a5d28da`
+- `KnowledgeMaster_0.2.6_aarch64.dmg`：9,128,121 bytes，SHA-256 `464165dc29d0f28871405c87c32de05c8d7beda00785430c09647727bcdf8893`
 
-清理后的两个 `main` 工作流均已成功：`9f4587fc` 对应 run `33966082269`，当前 HEAD `ab4ff5a0` 对应 run `33966229079`。这证明当前源码和 DMG 工作流已经在 macOS/Windows CI 中通过，但没有改变旧 `v0.2.5` Release 的附件；公开 macOS 包仍是 ZIP。
+标签工作流 run `34557718931` 全部成功：macOS 作业 2m38s，Windows 作业 4m25s，Release 发布作业 10s。重复的 `tauri-codex` 分支工作流 run `34557689621` 已主动取消，只保留会发布 Release 的标签流水线。CI 有一条非阻塞注记：部分 `actions/*@v4` 内置 Node 20 已弃用并被 Runner 强制用 Node 24 执行，后续应单独升级 Actions 版本。
+
+旧 `v0.2.5` Release 仍保留当时的 macOS ZIP、Windows 便携版和安装版，没有移动或覆盖旧标签。
 
 已推送的 CI 配置不再生成 macOS ZIP，改为：
 
@@ -65,7 +68,7 @@
 - upload path: src-tauri/target/release/bundle/dmg/*.dmg
 ```
 
-因此“DMG 已在本地验证”不等于“DMG 已出现在公开 Release”。若用户要求更新线上包，推荐发布新版本（例如 `v0.2.6`），不要静默移动已有标签。发布前同步修改以下五处版本号：
+发布前必须同步修改以下五处版本文件：
 
 - `package.json`
 - `package-lock.json`
@@ -73,7 +76,7 @@
 - `src-tauri/Cargo.lock`
 - `src-tauri/tauri.conf.json`
 
-推送 `main` 和 `v*` 标签会各触发一次 CI；标签流水线才负责创建 Release。若两套相同构建同时运行，可保留标签流水线并取消重复的 `main` 流水线。
+推送受监听分支和 `v*` 标签会各触发一次 CI；标签流水线才负责创建 Release。若两套相同构建同时运行，可保留标签流水线并取消重复的分支流水线。
 
 ## 4. 本地目录清理与依赖状态
 
@@ -113,6 +116,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 - 新增的前端异常矩形测试先复现了 `width = Infinity` 会污染正常批注合并结果；`src/utils.ts` 现在同时过滤非有限的 `x`、`y`、`width` 和 `height`。
 - 新增 Rust 回归测试验证 chunk 缓存三条路径：相同源哈希命中复用、源哈希变化后失效重建、损坏 JSON 后重建并修复磁盘缓存。
 - 本轮本地工具版本为 Node `v25.6.0`、npm `11.8.0`、Cargo `1.97.1`、rustc `1.97.1`；CI 仍固定 Node 22，并使用 Rust stable。
+- 2026-09-11 标签 CI 在 macOS 和 Windows 上都重新通过 `npm test` 与 Rust 测试，并分别成功构建 DMG 和 NSIS；公开 Release 附件已按上节再次读取核验。
 
 以下打包证据来自 2026-09-05 已提交基线，本轮没有重新执行 Tauri DMG 打包：
 
@@ -247,13 +251,13 @@ GitHub Actions 文件：`.github/workflows/tauri-ci.yml`
 2. **解析/OCR（P1）**：以“页面无文本或文本密度过低”为条件触发 OCR，不对所有 PDF 默认 OCR；缓存键应至少包含源文件 SHA-256、提取器/OCR 版本和语言配置，并保留页码、表格/公式占位及原文位置。先建立扫描页、双栏、表格和公式小型 fixture，再决定 OCR 引擎，避免先绑定供应商。
 3. **跨会话记忆（P2）**：遵守“不引入向量数据库”的当前约束，先把用户确认的结论、待办和来源写入本地 SQLite，并用关键词和时间/主题过滤召回；必须可查看、编辑、删除和关闭自动召回，回答中保留来源会话。不要直接把全部历史对话塞进上下文。
 4. **界面与 Windows（持续项）**：视觉调整应在核心交互稳定后按组件做；自动化优先覆盖输入法组合键、弹窗层级、PDF 缩放/选区和 Agent 不可用回退，真实 Windows 验收覆盖触控板、中文输入法、WebView2、PDF 清晰度及 `.cmd` Agent CLI。CI 通过不能替代真机结果。
-5. **发布（本轮执行）**：把 `0.2.6` 候选先推送到 `tauri-codex`，再创建 `v0.2.6` 标签触发跨平台流水线，不移动 `v0.2.5` 标签；完成后用 `gh release view v0.2.6 --json assets,url` 确认 DMG、Windows 便携版和安装版都存在。
+5. **发布（已完成）**：`0.2.6` 已先推送到 `tauri-codex`，再由 `v0.2.6` 标签流水线发布；DMG、Windows 便携版和安装版均已核验存在，`v0.2.5` 标签未移动。
 
 新功能修改后至少执行前端测试、Rust 测试和生产构建；涉及阅读器、弹窗、输入法或平台差异时，还要补组件测试和真实 UI 冒烟测试。
 
 ## 11. 当前工作树和本轮变更
 
-本轮开始时工作区干净；当前发布候选的所有变更均未暂存、未提交、未推送：
+本轮发布代码、测试、README 和版本变更已提交为 `c0a52f5f`，推送到远端 `tauri-codex`，并由 `v0.2.6` 标签发布：
 
 - `README.md` / `README.en.md`：增加 P0 上下文与缓存、P1 解析/OCR、P2 跨会话记忆和持续 Windows 验收的优化顺序，并明确路线图不等于已完成功能。
 - `package.json`、`package-lock.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`、`src-tauri/tauri.conf.json`：版本同步到 `0.2.6`。
@@ -262,7 +266,9 @@ GitHub Actions 文件：`.github/workflows/tauri-ci.yml`
 - `src-tauri/src/store.rs`：增加 chunk 缓存命中、失效和损坏恢复回归测试。
 - `docs/HANDOFF.md`：同步本轮实时状态、验证证据和 README 遗留项优化顺序。
 
-忽略目录 `node_modules/`、`dist/`、`src-tauri/target/`、`src-tauri/gen/` 是本轮安装和构建产物，不属于 Git 变更。下一步是提交候选、推送 `tauri-codex`、推送 `v0.2.6` 标签，并等待 Release 附件完成。
+忽略目录 `node_modules/`、`dist/`、`src-tauri/target/`、`src-tauri/gen/` 是本轮安装和构建产物，不属于 Git 变更。本文档的发布后状态将通过 docs-only 提交推送到 `tauri-codex`；标签继续固定在已构建的 `c0a52f5f`。
+
+用户下一步将在其他 Windows 设备上人工测试。建议反馈时至少记录 Windows 版本、便携版或安装版、WebView2 状态，以及触控板缩放、中文输入法、PDF 清晰度、Claude/Codex `.cmd` 发现和终止行为；问题附复现步骤、文件类型和截图，不要附 API Key 或私有文档。
 
 ## 12. 新窗口建议开场提示
 
