@@ -39,15 +39,22 @@ fn bootstrap(state: State<'_, AppState>) -> Result<BootstrapState, String> {
 }
 
 #[tauri::command]
-fn reload_library(state: State<'_, AppState>) -> Result<KnowledgeData, String> {
+async fn reload_library(app: AppHandle) -> Result<KnowledgeData, String> {
+    tauri::async_runtime::spawn_blocking(move || reload_library_data(&app.state::<AppState>()))
+        .await
+        .map_err(error)?
+}
+
+fn reload_library_data(state: &AppState) -> Result<KnowledgeData, String> {
     let mut inner = state.inner.lock().map_err(error)?;
     inner.data = store::load_data(&inner.root)?;
     let root = inner.root.clone();
     store::migrate_notes(&root, &mut inner.data)?;
+    let indexes_changed = store::migrate_document_indexes(&root, &mut inner.data)?;
     let metadata_changed = store::migrate_document_authors(&root, &mut inner.data);
     let filenames_changed = store::migrate_document_filenames(&root, &mut inner.data)?;
     let imported = store::sync_source_documents(&mut inner)?;
-    if (metadata_changed || filenames_changed) && imported == 0 {
+    if (indexes_changed || metadata_changed || filenames_changed) && imported == 0 {
         store::save_data(&root, &inner.data)?;
     }
     Ok(inner.data.clone())
@@ -81,9 +88,14 @@ fn reveal_path(app: AppHandle, state: State<'_, AppState>) -> Result<(), String>
 }
 
 #[tauri::command]
-fn import_files(state: State<'_, AppState>, paths: Vec<String>) -> Result<Vec<String>, String> {
-    let mut inner = state.inner.lock().map_err(error)?;
-    Ok(store::import_paths(&mut inner, &paths))
+async fn import_files(app: AppHandle, paths: Vec<String>) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let mut inner = state.inner.lock().map_err(error)?;
+        Ok(store::import_paths(&mut inner, &paths))
+    })
+    .await
+    .map_err(error)?
 }
 
 #[tauri::command]

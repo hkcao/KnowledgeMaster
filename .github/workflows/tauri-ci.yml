@@ -37,6 +37,8 @@ jobs:
       - run: npm test
       - run: cargo test --manifest-path src-tauri/Cargo.toml
       - run: npm run tauri build -- --bundles ${{ matrix.bundle }}
+      - name: Test library migrations and PDF refresh in release mode
+        run: cargo test --locked --release --manifest-path src-tauri/Cargo.toml --lib
       - name: Prepare portable Windows executable
         if: runner.os == 'Windows'
         shell: pwsh

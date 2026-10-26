@@ -28,7 +28,7 @@ pub struct KnowledgeDocument {
     pub page_count: Option<usize>,
     #[serde(default)]
     pub error: Option<String>,
-    #[serde(default)]
+    #[serde(default, alias = "sourceURL")]
     pub source_url: Option<String>,
 }
 

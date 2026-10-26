@@ -1275,6 +1275,38 @@ mod tests {
     }
 
     #[test]
+    fn legacy_versions_preserve_relations_and_original_json_during_migration() {
+        for version in [5, 6, 7] {
+            let root = tempfile::tempdir().unwrap();
+            let mut expected = sample_data();
+            expected.documents[0].authors.clear();
+            let mut legacy = serde_json::to_value(&expected).unwrap();
+            legacy["version"] = version.into();
+            let document = legacy["documents"][0].as_object_mut().unwrap();
+            document.remove("authors");
+            let url = document.remove("sourceUrl").unwrap();
+            document.insert("sourceURL".into(), url);
+            let bytes = serde_json::to_vec_pretty(&legacy).unwrap();
+            fs::write(root.path().join("knowledge.json"), &bytes).unwrap();
+
+            let loaded = load_or_migrate(root.path()).unwrap();
+            // Includes document IDs, topics, annotations, bookmarks, notes and chats.
+            assert_eq!(
+                serde_json::to_value(&loaded).unwrap(),
+                serde_json::to_value(&expected).unwrap()
+            );
+            assert_eq!(
+                fs::read(root.path().join("knowledge.json.migrated-v8.bak")).unwrap(),
+                bytes
+            );
+            assert_eq!(
+                serde_json::to_value(load_or_migrate(root.path()).unwrap()).unwrap(),
+                serde_json::to_value(expected).unwrap()
+            );
+        }
+    }
+
+    #[test]
     fn snapshot_sync_deletes_removed_rows() {
         let root = tempfile::tempdir().unwrap();
         let mut data = sample_data();

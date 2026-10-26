@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
     fs,
-    io::Read,
+    io::{Read, Write},
     path::{Path, PathBuf},
     sync::Mutex,
 };
@@ -225,6 +225,7 @@ pub fn switch_root(inner: &mut Inner, target: PathBuf, migrate: bool) -> Result<
     inner.root = target;
     inner.data = load_data(&inner.root)?;
     migrate_notes(&inner.root, &mut inner.data)?;
+    migrate_document_indexes(&inner.root, &mut inner.data)?;
     migrate_document_authors(&inner.root, &mut inner.data);
     migrate_document_filenames(&inner.root, &mut inner.data)?;
     sync_source_documents(inner)?;
@@ -233,10 +234,28 @@ pub fn switch_root(inner: &mut Inner, target: PathBuf, migrate: bool) -> Result<
 }
 
 pub fn stored_path(root: &Path, document: &KnowledgeDocument) -> Result<PathBuf, String> {
-    let relative = document
-        .stored_path
-        .as_deref()
-        .ok_or_else(|| "资料缺少存储路径".to_string())?;
+    let legacy_path;
+    let relative = if let Some(relative) = document.stored_path.as_deref() {
+        relative
+    } else {
+        // Swift and early Tauri releases omitted storedPath for nested originals.
+        if Path::new(&document.name)
+            .file_name()
+            .and_then(|name| name.to_str())
+            != Some(document.name.as_str())
+        {
+            return Err("旧版原件名称不是有效文件名".into());
+        }
+        legacy_path = [
+            document.id.to_string(),
+            document.id.to_string().to_uppercase(),
+        ]
+        .into_iter()
+        .map(|id| format!("source/documents/{id}/{}", document.name))
+        .find(|relative| root.join(relative).is_file())
+        .ok_or_else(|| format!("找不到旧版原件：{}", document.name))?;
+        &legacy_path
+    };
     let value = PathBuf::from(relative);
     if value.is_absolute() {
         return Ok(value);
@@ -250,36 +269,18 @@ pub fn extract_path(path: &Path) -> Result<ExtractedDocument, String> {
     let extension = extension(path);
     match extension.as_str() {
         "pdf" => {
-            let text = pdf_extract::extract_text(path).map_err(error)?;
-            let parts: Vec<String> = text
-                .split('\u{c}')
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
-                .collect();
-            let page_count = lopdf::Document::load(path)
-                .map(|document| document.get_pages().len())
-                .unwrap_or_else(|_| parts.len().max(1));
-            let pages = if parts.len() > 1 {
-                parts
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, text)| ExtractedPage {
-                        number: index + 1,
-                        text,
-                    })
-                    .collect()
-            } else {
-                let mut values = vec![ExtractedPage {
-                    number: 1,
-                    text: text.clone(),
-                }];
-                values.extend((1..page_count).map(|index| ExtractedPage {
-                    number: index + 1,
-                    text: String::new(),
-                }));
-                values
-            };
-            Ok(ExtractedDocument { text, pages })
+            let pdf_path = path.to_path_buf();
+            // pdf-extract can panic on unsupported fonts. Keep that unwind away
+            // from the WebView callback and the library mutex guard. Use the same
+            // parser stack budget on Windows and macOS.
+            std::thread::Builder::new()
+                .name("pdf-extraction".into())
+                .stack_size(8 * 1024 * 1024)
+                .spawn(move || extract_pdf(&pdf_path))
+                .map_err(error)?
+                .join()
+                .unwrap_or_else(|_| Err("解析器异常，可能包含不支持的字体或 PDF 结构".into()))
+                .map_err(|message| format!("PDF 解析失败：{}（{message}）", file_name(path)))
         }
         "html" | "htm" => {
             let bytes = fs::read(path).map_err(error)?;
@@ -301,6 +302,39 @@ pub fn extract_path(path: &Path) -> Result<ExtractedDocument, String> {
             pages: vec![],
         }),
     }
+}
+
+fn extract_pdf(path: &Path) -> Result<ExtractedDocument, String> {
+    let text = pdf_extract::extract_text(path).map_err(error)?;
+    let parts: Vec<String> = text
+        .split('\u{c}')
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect();
+    let page_count = lopdf::Document::load(path)
+        .map(|document| document.get_pages().len())
+        .unwrap_or_else(|_| parts.len().max(1));
+    let pages = if parts.len() > 1 {
+        parts
+            .into_iter()
+            .enumerate()
+            .map(|(index, text)| ExtractedPage {
+                number: index + 1,
+                text,
+            })
+            .collect()
+    } else {
+        let mut values = vec![ExtractedPage {
+            number: 1,
+            text: text.clone(),
+        }];
+        values.extend((1..page_count).map(|index| ExtractedPage {
+            number: index + 1,
+            text: String::new(),
+        }));
+        values
+    };
+    Ok(ExtractedDocument { text, pages })
 }
 
 fn extract_docx(path: &Path) -> Result<ExtractedDocument, String> {
@@ -325,12 +359,77 @@ fn extract_docx(path: &Path) -> Result<ExtractedDocument, String> {
     })
 }
 
-pub fn read_extracted(root: &Path, id: Uuid) -> ExtractedDocument {
+fn extraction_index_path(root: &Path, id: Uuid) -> PathBuf {
     let path = index_dir(root).join(format!("{id}.json"));
-    fs::read(path)
+    let legacy = index_dir(root).join(format!("{}.json", id.to_string().to_uppercase()));
+    if !path.exists() && legacy.exists() {
+        legacy
+    } else {
+        path
+    }
+}
+
+fn parse_extracted(bytes: &[u8]) -> Option<ExtractedDocument> {
+    let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    // Defaults support older records, but an unrelated JSON object is not an index.
+    if value.get("text").is_none() && value.get("pages").is_none() {
+        return None;
+    }
+    serde_json::from_value(value).ok()
+}
+
+pub fn read_extracted(root: &Path, id: Uuid) -> ExtractedDocument {
+    fs::read(extraction_index_path(root, id))
         .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .and_then(|bytes| parse_extracted(&bytes))
         .unwrap_or_default()
+}
+
+pub fn migrate_document_indexes(root: &Path, data: &mut KnowledgeData) -> Result<bool, String> {
+    prepare_directories(root)?;
+    let mut changed = false;
+    for document in &mut data.documents {
+        if document.stored_path.is_none() {
+            let path = stored_path(root, document)?;
+            document.stored_path = Some(
+                path.strip_prefix(root)
+                    .map_err(error)?
+                    .to_string_lossy()
+                    .replace('\\', "/"),
+            );
+            changed = true;
+        }
+        let path = extraction_index_path(root, document.id);
+        let bytes = match fs::read(&path) {
+            Ok(bytes) => Some(bytes),
+            Err(value) if value.kind() == std::io::ErrorKind::NotFound => None,
+            Err(value) => return Err(format!("索引读取失败：{}（{value}）", document.name)),
+        };
+        if let Some(extracted) = bytes.as_deref().and_then(parse_extracted) {
+            // The text/pages schema is shared by Swift and all Tauri releases.
+            read_or_build_chunk_cache(root, document, &extracted);
+            continue;
+        }
+        let source = stored_path(root, document)?;
+        let extracted = extract_path(&source)
+            .map_err(|value| format!("索引重建失败：{}（{value}）", document.name))?;
+        if bytes.is_some() {
+            let backup = path.with_extension("json.pre-rebuild.bak");
+            if !backup.exists() {
+                fs::copy(&path, backup).map_err(error)?;
+            }
+        }
+        // Rebuild chunks even if their old source hash still matches. They may
+        // have been produced from the previously unreadable extraction index.
+        write_chunk_cache(root, document, &extracted)?;
+        let mut temporary = tempfile::NamedTempFile::new_in(index_dir(root)).map_err(error)?;
+        temporary
+            .write_all(&serde_json::to_vec_pretty(&extracted).map_err(error)?)
+            .map_err(error)?;
+        temporary.persist(&path).map_err(error)?;
+        changed = true;
+    }
+    Ok(changed)
 }
 
 fn chunk_cache_path(root: &Path, id: Uuid) -> PathBuf {
@@ -1679,7 +1778,13 @@ pub fn migrate_document_filenames(root: &Path, data: &mut KnowledgeData) -> Resu
 pub fn migrate_document_authors(root: &Path, data: &mut KnowledgeData) -> bool {
     let mut changed = false;
     for document in &mut data.documents {
-        let extracted = read_extracted(root, document.id);
+        // An unavailable index must not erase previously saved author metadata.
+        let Some(extracted) = fs::read(extraction_index_path(root, document.id))
+            .ok()
+            .and_then(|bytes| parse_extracted(&bytes))
+        else {
+            continue;
+        };
         let extension = document.extension_name.trim_start_matches('.');
         let bytes = if matches!(extension, "html" | "htm") {
             stored_path(root, document)
@@ -1763,6 +1868,247 @@ pub fn error(value: impl std::fmt::Display) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn write_test_pdf(path: &Path, unsupported_encoding: bool) {
+        use lopdf::{
+            content::{Content, Operation},
+            dictionary, Document, Object, Stream,
+        };
+
+        let mut pdf = Document::with_version("1.5");
+        let pages_id = pdf.new_object_id();
+        let mut font = dictionary! {
+            "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica",
+        };
+        if unsupported_encoding {
+            font.set("Encoding", "UnsupportedEncoding");
+        }
+        let font_id = pdf.add_object(font);
+        let resources_id =
+            pdf.add_object(dictionary! { "Font" => dictionary! { "F1" => font_id } });
+        let content = Content {
+            operations: vec![
+                Operation::new("BT", vec![]),
+                Operation::new("Tf", vec!["F1".into(), 12.into()]),
+                Operation::new("Td", vec![50.into(), 750.into()]),
+                Operation::new("Tj", vec![Object::string_literal("Manual PDF import")]),
+                Operation::new("ET", vec![]),
+            ],
+        }
+        .encode()
+        .unwrap();
+        let content_id = pdf.add_object(Stream::new(dictionary! {}, content));
+        let page_id = pdf.add_object(dictionary! {
+            "Type" => "Page", "Parent" => pages_id, "Contents" => content_id,
+        });
+        pdf.objects.insert(pages_id, dictionary! {
+            "Type" => "Pages", "Kids" => vec![Object::Reference(page_id)], "Count" => 1,
+            "Resources" => resources_id, "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+        }.into());
+        let catalog_id = pdf.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+        pdf.trailer.set("Root", catalog_id);
+        pdf.save(path).unwrap();
+    }
+
+    fn pdf_test_state(root: &Path) -> AppState {
+        AppState {
+            inner: Mutex::new(Inner {
+                root: root.to_path_buf(),
+                data: KnowledgeData::default(),
+                settings: AppSettings::default(),
+            }),
+            processes: Mutex::new(HashMap::new()),
+            cancelled_runs: Mutex::new(HashSet::new()),
+            api_key_cache: Mutex::new(None),
+        }
+    }
+
+    #[test]
+    fn refresh_imports_manual_pdf_and_reuses_persisted_index() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("中文资料库");
+        prepare_directories(&root).unwrap();
+        let source = source_dir(&root).join("手动论文.pdf");
+        write_test_pdf(&source, false);
+        let state = pdf_test_state(&root);
+        let data = crate::reload_library_data(&state).unwrap();
+        assert_eq!(data.documents.len(), 1);
+        assert!(!source.exists());
+        let document = &data.documents[0];
+        assert!(stored_path(&root, document).unwrap().exists());
+        assert_eq!(document.page_count, Some(1));
+        assert!(read_extracted(&root, document.id)
+            .text
+            .contains("Manual PDF import"));
+        assert_eq!(load_data(&root).unwrap().documents.len(), 1);
+        let next = crate::reload_library_data(&state).unwrap();
+        assert_eq!(next.documents.len(), 1);
+        assert_eq!(next.documents[0].id, document.id);
+    }
+
+    #[test]
+    fn pdf_parser_panic_returns_error_and_preserves_source_and_state() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        prepare_directories(root).unwrap();
+        let source = source_dir(root).join("unsupported-font.pdf");
+        write_test_pdf(&source, true);
+        let state = pdf_test_state(root);
+        let message = crate::reload_library_data(&state).unwrap_err();
+        assert!(message.contains("unsupported-font.pdf"), "{message}");
+        {
+            let inner = state.inner.lock().unwrap();
+            assert!(source.exists());
+            assert!(inner.data.documents.is_empty());
+            assert_eq!(fs::read_dir(index_dir(root)).unwrap().count(), 0);
+            assert_eq!(fs::read_dir(chunks_dir(root)).unwrap().count(), 0);
+        }
+        write_test_pdf(&source, false);
+        assert_eq!(
+            crate::reload_library_data(&state).unwrap().documents.len(),
+            1
+        );
+        assert_eq!(load_data(root).unwrap().documents.len(), 1);
+    }
+
+    #[test]
+    fn invalid_pdf_returns_named_error_without_moving_original() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        prepare_directories(root).unwrap();
+        let source = source_dir(root).join("invalid.pdf");
+        fs::write(&source, b"not a PDF").unwrap();
+        let state = pdf_test_state(root);
+        let message = crate::reload_library_data(&state).unwrap_err();
+        assert!(message.contains("invalid.pdf"), "{message}");
+        assert!(source.exists());
+        assert!(state.inner.lock().unwrap().data.documents.is_empty());
+    }
+
+    #[test]
+    fn refresh_repairs_missing_or_invalid_pdf_indexes_and_keeps_document_id() {
+        for contents in [None, Some("broken JSON"), Some("{}")] {
+            let directory = tempfile::tempdir().unwrap();
+            let root = directory.path();
+            prepare_directories(root).unwrap();
+            write_test_pdf(&source_dir(root).join("paper.pdf"), false);
+            let state = pdf_test_state(root);
+            let initial = crate::reload_library_data(&state).unwrap();
+            let document = &initial.documents[0];
+            let index = index_dir(root).join(format!("{}.json", document.id));
+            if let Some(contents) = contents {
+                fs::write(&index, contents).unwrap();
+            } else {
+                fs::remove_file(&index).unwrap();
+            }
+            let mut stale: ChunkCache =
+                serde_json::from_slice(&fs::read(chunk_cache_path(root, document.id)).unwrap())
+                    .unwrap();
+            stale.chunks[0].text = "stale text".into();
+            fs::write(
+                chunk_cache_path(root, document.id),
+                serde_json::to_vec(&stale).unwrap(),
+            )
+            .unwrap();
+
+            let next = crate::reload_library_data(&state).unwrap();
+            assert_eq!(next.documents[0].id, document.id);
+            assert_eq!(next.documents.len(), 1);
+            assert!(read_extracted(root, document.id)
+                .text
+                .contains("Manual PDF import"));
+            let cache: ChunkCache =
+                serde_json::from_slice(&fs::read(chunk_cache_path(root, document.id)).unwrap())
+                    .unwrap();
+            assert!(cache.chunks[0].text.contains("Manual PDF import"));
+            if let Some(contents) = contents {
+                assert_eq!(
+                    fs::read_to_string(index.with_extension("json.pre-rebuild.bak")).unwrap(),
+                    contents
+                );
+            }
+            let persisted = fs::read(&index).unwrap();
+            crate::reload_library_data(&state).unwrap();
+            assert_eq!(fs::read(&index).unwrap(), persisted);
+        }
+    }
+
+    #[test]
+    fn legacy_pdf_index_and_nested_original_are_reused_without_reparsing() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        prepare_directories(root).unwrap();
+        write_test_pdf(&source_dir(root).join("paper.pdf"), false);
+        let state = pdf_test_state(root);
+        let mut initial = crate::reload_library_data(&state).unwrap();
+        let document = &mut initial.documents[0];
+        let index = index_dir(root).join(format!("{}.json", document.id));
+        let legacy_index =
+            index_dir(root).join(format!("{}.json", document.id.to_string().to_uppercase()));
+        let legacy_bytes = br#"{"text":"legacy searchable text","pages":[{"number":1,"text":"legacy searchable text"}]}"#;
+        fs::rename(&index, &legacy_index).unwrap();
+        fs::write(&legacy_index, legacy_bytes).unwrap();
+        let nested = documents_dir(root).join(document.id.to_string().to_uppercase());
+        fs::create_dir_all(&nested).unwrap();
+        let original = nested.join(&document.name);
+        fs::rename(stored_path(root, document).unwrap(), &original).unwrap();
+        // A compatible legacy index must be reused even if extraction is unavailable.
+        fs::write(&original, b"cannot reparse this PDF").unwrap();
+        document.stored_path = None;
+        let id = document.id;
+        save_data(root, &initial).unwrap();
+        assert!(read_extracted(root, id)
+            .text
+            .contains("legacy searchable text"));
+        let next = crate::reload_library_data(&state).unwrap();
+        assert_eq!(next.documents[0].id, initial.documents[0].id);
+        assert_eq!(
+            stored_path(root, &next.documents[0])
+                .unwrap()
+                .canonicalize()
+                .unwrap(),
+            original.canonicalize().unwrap()
+        );
+        assert!(next.documents[0].stored_path.is_some());
+        assert_eq!(fs::read(legacy_index).unwrap(), legacy_bytes);
+        assert_eq!(
+            search_documents(&state.inner.lock().unwrap(), "searchable").len(),
+            1
+        );
+    }
+
+    #[test]
+    fn failed_pdf_index_rebuild_keeps_existing_files_and_metadata() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        prepare_directories(root).unwrap();
+        write_test_pdf(&source_dir(root).join("paper.pdf"), false);
+        let state = pdf_test_state(root);
+        let mut initial = crate::reload_library_data(&state).unwrap();
+        initial.documents[0].authors = vec!["Previously saved author".into()];
+        save_data(root, &initial).unwrap();
+        let document = &initial.documents[0];
+        let index = index_dir(root).join(format!("{}.json", document.id));
+        fs::write(&index, b"old incompatible index").unwrap();
+        let mut startup_data = initial.clone();
+        assert!(!migrate_document_authors(root, &mut startup_data));
+        assert_eq!(startup_data.documents[0].authors, document.authors);
+        let chunks = fs::read(chunk_cache_path(root, document.id)).unwrap();
+        write_test_pdf(&stored_path(root, document).unwrap(), true);
+        let message = crate::reload_library_data(&state).unwrap_err();
+        assert!(message.contains("paper.pdf"), "{message}");
+        assert_eq!(fs::read(&index).unwrap(), b"old incompatible index");
+        assert_eq!(
+            fs::read(chunk_cache_path(root, document.id)).unwrap(),
+            chunks
+        );
+        assert_eq!(load_data(root).unwrap().documents[0].id, document.id);
+        assert_eq!(
+            serde_json::to_value(load_data(root).unwrap()).unwrap(),
+            serde_json::to_value(initial).unwrap()
+        );
+        assert!(state.inner.lock().is_ok());
+    }
 
     #[test]
     fn chunking_and_score_match_native_semantics() {
@@ -1853,6 +2199,18 @@ mod tests {
             serde_json::from_slice(&fs::read(chunk_cache_path(root.path(), document.id)).unwrap())
                 .unwrap();
         assert_eq!(repaired.chunks[0].text, "original cached text");
+
+        let mut legacy_cache = repaired;
+        legacy_cache.version = 0;
+        legacy_cache.chunks[0].text = "legacy chunk format".into();
+        fs::write(
+            chunk_cache_path(root.path(), document.id),
+            serde_json::to_vec(&legacy_cache).unwrap(),
+        )
+        .unwrap();
+        let upgraded = read_or_build_chunk_cache(root.path(), &document, &original);
+        assert_eq!(upgraded.version, CHUNK_CACHE_VERSION);
+        assert_eq!(upgraded.chunks[0].text, "original cached text");
     }
 
     #[test]

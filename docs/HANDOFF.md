@@ -1,10 +1,40 @@
 # KnowledgeMaster 开发交接
 
-更新日期：2026-09-11（Asia/Shanghai）
+更新日期：2026-10-26（Asia/Shanghai）
 
 本文档供后续 Codex/开发者在新窗口中继续工作。开始前请以实际 `git status`、远端分支、GitHub Actions 和 Release 为准；本文记录的是上述日期核验过的状态。
 
 本项目使用个人 `project-handoff` Skill（`/Users/hank/.codex/skills/project-handoff`）持续维护本文档。发生重要决策、实现、验证、发布或工作区状态变化时更新同一文件，不创建按日期重复的交接文档。
+
+## 0. 首轮 Windows PDF 刷新闪退修复（2026-10-26）
+
+- **用户报告**：Windows 11、`0.2.6` portable，把任意 PDF 复制到资料库 `source/` 后点击刷新目录，应用退出。当前开发机为 macOS，仅安装 `aarch64-apple-darwin` Rust target；尚未在 Windows 真机复现或确认修复。
+- **确认的代码缺陷**：`reload_library` / `import_files` 原为同步 Tauri command；`extract_path` 直接调用 `pdf-extract 0.10.0`，未隔离解析器 panic。不支持的字体编码可以触发 `pdf-extract/src/lib.rs:359` 的 `unexpected encoding` panic，并沿持有资料库 Mutex 的命令栈传播。新增测试在修复前确实失败，修复后通过。这是已复现的缺陷，不等于已证明用户“任意 PDF”闪退的唯一原因。
+- **兼容性核对**：`git diff v0.2.5 v0.2.6` 确认 PDF 解析实现未变、Cargo 依赖及锁定版本未变（Cargo 清单/锁文件仅改应用版本）。当前资料库仍是 data version 8 / SQLite schema 1，本轮未更改数据格式；未发现该次升级造成 PDF 功能不兼容的证据。
+- **实现**：`src-tauri/src/lib.rs` 将刷新和文件导入改为 async command + `spawn_blocking`，原刷新逻辑提取为 `reload_library_data`；`src-tauri/src/store.rs::extract_path` 使用独立解析线程（8 MiB 栈），通过 `join` 把解析 panic 转成含文件名的错误，供现有前端“刷新失败”提示显示。失败发生在移动原件/写入索引前，原件与资料库锁保持可用。8 MiB 是统一平台栈预算，尚无证据表明用户的闪退源自栈溢出；线程隔离也不能恢复进程级 OOM、栈溢出或原生访问异常。
+- **回归覆盖**：临时资料库和程序生成的 PDF，不接触用户资料；覆盖中文目录/文件名、复制 PDF 后完整刷新、索引与 SQLite 持久化、再次刷新无重复、不支持的字体 panic、普通损坏 PDF 错误、失败后修复文件并再次刷新。原件在失败时保留，无半成品索引或 chunk。
+- **验证**：`npm test` 14/14；`npm run build` 成功（既有 >500 kB bundle 提示）；`cargo test --manifest-path src-tauri/Cargo.toml --locked` 32/32；`cargo test --locked --release --manifest-path src-tauri/Cargo.toml --lib pdf_` 7/7；`cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`、`git diff --check` 通过。另在修复前以 `RUST_MIN_STACK=1048576` 运行普通 PDF 用例通过，不能把 Windows 默认栈大小认定为根因。
+- **CI**：最初增加生产模式 PDF 测试，后续扩大为全部 Rust 库测试（见 0.1 节）；本轮没有推送，因此尚无这份修复的 Windows CI 结果。
+- **当前交付状态**：修复、测试、CI 和本文档仅为工作区未暂存修改；没有提交、推送、标签或新安装包。版本仍为 `0.2.6`，线上旧版不包含修复。下一步先在 Windows 跑这些测试并用 portable EXE 验证用户步骤；发布时使用新版本/新标签，不覆盖 `v0.2.6`。
+
+### 0.1 旧资料库与索引迁移补充
+
+- **用户要求**：继续排查已有索引是否与新版不兼容；需要支持旧数据迁移。保留首轮解析器崩溃修复。
+- **历史源码证据**：`9f4587fc^` 的 Swift `KnowledgeStore.swift` 用大写 UUID 命名索引，未填写 `storedPath` 时使用 `source/documents/<UUID>/<name>`；早期 `tauri` 分支也支持缺省嵌套原件路径。历史提取索引均为 `{text, pages: [{number, text}]}`，与当前格式一致。Swift 文档来源字段是 `sourceURL`，当前 Rust 序列化字段是 `sourceUrl`。
+- **已复现缺口**：刷新只扫描新文件，不修复已有文档的损坏/缺失索引；`{}` 等无关 JSON 会被默认字段解析为空索引；缺省原件路径在当前实现报“资料缺少存储路径”。三项新增索引用例在修复前均失败。索引不可读时，启动阶段作者迁移还可能用空内容覆盖已有作者。
+- **实现边界**：不改变 SQLite schema、数据版本或提取索引结构，不全量重新解析兼容索引。`store::extraction_index_path` 兼容大小写 UUID；`stored_path` 恢复旧版缺省嵌套路径；`models::KnowledgeDocument.source_url` 接受 `sourceURL` 别名。刷新 `reload_library_data` 和切换资料库 `switch_root` 在作者/文件名迁移前调用 `migrate_document_indexes`，将恢复的原件路径写回元数据。
+- **恢复规则**：兼容索引复用，并通过现有 chunk 版本/哈希检查重建旧分块缓存；提取索引缺失、损坏或缺少 `text/pages` 字段时才从原件重建。成功解析后保留旧索引为 `<UUID>.json.pre-rebuild.bak`（不覆盖已有备份），先更新分块缓存，再用同目录临时文件原子替换提取索引。文档 ID 不变；解析失败时返回带文件名的错误，原索引、分块、原件和数据库不变，不用空内容覆盖作者。
+- **触发时机**：旧 `knowledge.json → knowledge.db` 仍在加载时自动迁移，并保留 `knowledge.json.migrated-v8.bak`；索引修复在用户刷新目录或切换资料库时执行。启动读取兼容旧索引，但不强制解析全部旧原件。
+- **当前验证**：`cargo test --locked --manifest-path src-tauri/Cargo.toml` 36/36；`cargo test --locked --release --manifest-path src-tauri/Cargo.toml --lib` 36/36；`npm test` 14/14；`npm run build` 成功；fmt/diff 检查通过。新增覆盖数据版本 5/6/7、缺失 authors、`sourceURL`、完整关系/会话/批注往返、JSON 备份字节不变、重复加载幂等、旧索引直接复用、嵌套原件路径、三种坏/缺索引恢复、重建失败无破坏；现有 chunk 测试补充旧版本号失效重建。大小写路径断言按 canonicalize 比较，以适配 macOS/Windows 常见的大小写不敏感文件系统。
+- **当前 CI**：生产构建后执行 `cargo test --locked --release --manifest-path src-tauri/Cargo.toml --lib`，覆盖所有迁移和 PDF 测试；本机成功不代表 Windows UI 验证成功。尚无用户现场资料库或 Windows 异常日志，仍不能认定旧索引是“任意 PDF 闪退”的唯一原因。
+
+### 0.2 v0.2.7 构建发布（进行中）
+
+- 用户已明确授权提交 GitHub、构建并发布新的 Windows 版本，下载后自行测试。
+- 版本文件已同步到 `0.2.7`：`package.json`、`package-lock.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`、`src-tauri/tauri.conf.json`。不改动依赖版本、SQLite schema 或数据版本。
+- `0.2.7` 提交前重新验证：前端 14/14、Rust Debug 36/36、Release 36/36、生产前端构建、fmt、diff 检查全部通过；六处应用版本字段均为 `0.2.7`。
+- 提交前远端 `tauri-codex` 仍为 `566cdff1`，`v0.2.7` 不存在；现有最新正式 Release 为 `v0.2.6`。
+- 计划提交并推送修复和版本，创建新 `v0.2.7` 标签触发既有跨平台工作流。Windows 作业生成 portable EXE 与 NSIS 安装包；工作流还会生成 macOS DMG。构建、CI 和公开 Release 尚待执行核验，不能据本地测试认定已发布。
 
 ## 1. 项目定位与不可破坏的约束
 
@@ -31,11 +61,10 @@
 - 本地目录：`/Users/hank/Desktop/知识整理器`
 - GitHub：`https://github.com/hkcao/KnowledgeMaster`
 - 仓库：Public，MIT License
-- 当前分支：`tauri-codex`；已从 `23b3dfea` 安全快进到 `main` 基线并完成本轮发布。
-- 当前代码/发布提交：`c0a52f5f9f1b81c12c6f498bb61b7135c2cc4f86`
-- 发布提交：`release: prepare v0.2.6 Windows test build`
+- 当前分支：`tauri-codex`；2026-10-26 提交前 `git ls-remote` 确认本地 HEAD 与远端分支均为 `566cdff14c4e6644f9ad1fbcc234f8934c6dd071`（`docs: record v0.2.6 release status`）。本轮修复与 `0.2.7` 版本变更待提交；发布进度见 0.2 节。
+- 当前线上发布提交：`c0a52f5f9f1b81c12c6f498bb61b7135c2cc4f86`（`release: prepare v0.2.6 Windows test build`）。
 - 当前公开正式版本/标签：`v0.2.6`
-- 2026-09-11 实时核验：远端 `refs/heads/tauri-codex` 和 `refs/tags/v0.2.6^{}` 都指向 `c0a52f5f`；本文档会通过紧随其后的 docs-only 提交同步发布结果，精确分支 tip 以 `git rev-parse HEAD` 为准。
+- 2026-10-26 再次核验：`refs/tags/v0.2.6^{}` 仍指向 `c0a52f5f`，分支 tip 为后续 docs-only 提交 `566cdff1`，并非发布二进制的提交。
 - 2026-09-11 实时核验：本地 `main`、本地 `origin/main` 和远端 `refs/heads/main` 都指向 `ab4ff5a0`。
 - `v0.2.5` 是 annotated tag，解引用后的发布提交为 `78b4b95b6a5d9a40fa9327839510321411d715af`。
 
@@ -51,7 +80,7 @@
 
 当前公开 Release：<https://github.com/hkcao/KnowledgeMaster/releases/tag/v0.2.6>
 
-2026-09-11 实时核验，`v0.2.6` 为非草稿、非预发布版本，实际附件为：
+2026-10-26 通过 `gh release view v0.2.6` 再次核验，`v0.2.6` 为非草稿、非预发布版本，实际附件名称、大小与摘要仍为：
 
 - `KnowledgeMaster-portable.exe`：22,312,448 bytes，SHA-256 `5853a98cd0a3969f997602695f49ac68ac4599ccad3e4ee50b821c0bcf4a509f`
 - `KnowledgeMaster_0.2.6_x64-setup.exe`：6,983,337 bytes，SHA-256 `41e43094016b8a47984518844ab57e3ee47bd099b82c7998170bfacf2a5d28da`
@@ -107,7 +136,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 ## 5. 最近一次本地验证结果
 
-当前工作树已完成以下验证：
+2026-10-26 当前最终修复验证见第 0.1 节。以下为 2026-09-11 发布基线的历史验证：
 
 - 2026-09-11 基线 `npm test`：1 个测试文件，12 项测试通过；测试优化后再次执行为 1 个测试文件、14 项测试通过。
 - 2026-09-11 `cargo test --manifest-path src-tauri/Cargo.toml`：29 项 Rust 测试通过（原基线 28 项）。
@@ -257,7 +286,19 @@ GitHub Actions 文件：`.github/workflows/tauri-ci.yml`
 
 ## 11. 当前工作树和本轮变更
 
-本轮发布代码、测试、README 和版本变更已提交为 `c0a52f5f`，推送到远端 `tauri-codex`，并由 `v0.2.6` 标签发布：
+2026-10-26 开始时工作树干净；发布准备阶段有十一个未暂存修改，无暂存或未跟踪文件：
+
+- `src-tauri/src/lib.rs`：后台刷新/导入及可测试刷新函数。
+- `src-tauri/src/store.rs`：PDF 解析线程与错误转换，旧原件/索引兼容、刷新恢复、作者保护，六项 PDF 回归测试及 chunk 旧版本测试。
+- `src-tauri/src/models.rs`：兼容旧 `sourceURL` 字段。
+- `src-tauri/src/database.rs`：数据版本 5/6/7 的完整关系与备份迁移测试。
+- `.github/workflows/tauri-ci.yml`：生产模式 Rust 库测试（含迁移/PDF）。
+- `docs/HANDOFF.md`：本轮证据、未确认事项与后续步骤；本文档自身也未提交、未暂存。
+- 五处版本文件（见 0.2 节）：应用版本同步到 `0.2.7`。
+
+当前本地 `dist/`、`src-tauri/target/` 等仍被忽略；本轮重新构建了前端和 macOS Rust debug/release 测试程序，未生成 Windows EXE、NSIS 或新 DMG。
+
+以下是 2026-09-11 发布变更的历史记录。代码、测试、README 和版本变更已提交为 `c0a52f5f`，推送到远端 `tauri-codex`，并由 `v0.2.6` 标签发布：
 
 - `README.md` / `README.en.md`：增加 P0 上下文与缓存、P1 解析/OCR、P2 跨会话记忆和持续 Windows 验收的优化顺序，并明确路线图不等于已完成功能。
 - `package.json`、`package-lock.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`、`src-tauri/tauri.conf.json`：版本同步到 `0.2.6`。
@@ -266,9 +307,9 @@ GitHub Actions 文件：`.github/workflows/tauri-ci.yml`
 - `src-tauri/src/store.rs`：增加 chunk 缓存命中、失效和损坏恢复回归测试。
 - `docs/HANDOFF.md`：同步本轮实时状态、验证证据和 README 遗留项优化顺序。
 
-忽略目录 `node_modules/`、`dist/`、`src-tauri/target/`、`src-tauri/gen/` 是本轮安装和构建产物，不属于 Git 变更。本文档的发布后状态将通过 docs-only 提交推送到 `tauri-codex`；标签继续固定在已构建的 `c0a52f5f`。
+当时发布后的交接更新已提交为 `566cdff1`；标签继续固定在已构建的 `c0a52f5f`。
 
-用户下一步将在其他 Windows 设备上人工测试。建议反馈时至少记录 Windows 版本、便携版或安装版、WebView2 状态，以及触控板缩放、中文输入法、PDF 清晰度、Claude/Codex `.cmd` 发现和终止行为；问题附复现步骤、文件类型和截图，不要附 API Key 或私有文档。
+当前下一步是 Windows 11 portable 验收第 0/0.1 节修复：在旧资料库副本中确认 JSON 自动迁移、批注/主题/书签保留；损坏索引刷新后产生备份并恢复检索；再把普通 PDF 复制到 `source/`，刷新后确认入库、可阅读、再次刷新无重复；不支持字体的测试文件应显示错误且窗口仍可操作。如仍闪退，收集 Windows 事件查看器中的异常代码、故障模块及 WebView2 版本，以区分 Rust panic、栈溢出和 WebView2 进程退出；目前尚未取得这些现场证据。
 
 ## 12. 新窗口建议开场提示
 
