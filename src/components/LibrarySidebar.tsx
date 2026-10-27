@@ -38,6 +38,7 @@ interface Props {
   settings: AppSettings;
   currentDocumentId?: UUID | null;
   externalRecommendationIds?: UUID[];
+  refreshWarnings?: string[];
   onData: (data: KnowledgeData) => void;
   onReload: () => Promise<KnowledgeData>;
   onExternalRecommendationsHandled?: () => void;
@@ -189,8 +190,7 @@ export default function LibrarySidebar(props: Props) {
     const before = new Set(data.documents.map((document) => document.id));
     const messages = await api.importFiles(paths);
     setMessage(messages.join(" · "));
-    const next = await api.reload();
-    onData(next);
+    const next = await onReload();
     const imported = next.documents.filter((document) => !before.has(document.id));
     await showRecommendations(imported);
   }
@@ -245,8 +245,7 @@ export default function LibrarySidebar(props: Props) {
       const messages = await api.importWebPage(webURL, importId);
       setMessage(messages.join(" · "));
       setWebImportProgress({ importId, stage: "refreshing", detail: "正在刷新知识目录…" });
-      const next = await api.reload();
-      onData(next);
+      const next = await onReload();
       const imported = next.documents.filter((document) => !before.has(document.id));
       setWebDialog(false);
       setWebURL("");
@@ -477,6 +476,12 @@ export default function LibrarySidebar(props: Props) {
             )}
           </div>
           {message && <p className="status-line" title={message}>{message}</p>}
+          {!!props.refreshWarnings?.length && (
+            <details className="refresh-warnings">
+              <summary>已跳过 {props.refreshWarnings.length} 项失败处理，其余资料已刷新</summary>
+              <ul>{props.refreshWarnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>
+            </details>
+          )}
         </div>
       )}
 

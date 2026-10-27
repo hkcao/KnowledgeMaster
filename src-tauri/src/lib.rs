@@ -3,6 +3,7 @@ mod ai;
 mod database;
 mod export;
 mod models;
+mod ocr;
 mod store;
 
 use crate::{
@@ -30,37 +31,46 @@ fn bootstrap_value(state: &AppState) -> Result<BootstrapState, String> {
         data: inner.data,
         settings: inner.settings,
         agent_availability: agent::availability(),
+        warnings: vec![],
     })
 }
 
-#[tauri::command]
+// Library commands may wait for the mutex while CPU OCR runs. Dispatch them
+// off the WebView thread so opening/closing panels and OCR cancellation stay responsive.
+#[tauri::command(async)]
 fn bootstrap(state: State<'_, AppState>) -> Result<BootstrapState, String> {
     bootstrap_value(&state)
 }
 
 #[tauri::command]
-async fn reload_library(app: AppHandle) -> Result<KnowledgeData, String> {
+async fn reload_library(app: AppHandle) -> Result<LibraryRefreshResult, String> {
     tauri::async_runtime::spawn_blocking(move || reload_library_data(&app.state::<AppState>()))
         .await
         .map_err(error)?
 }
 
-fn reload_library_data(state: &AppState) -> Result<KnowledgeData, String> {
+fn reload_library_data(state: &AppState) -> Result<LibraryRefreshResult, String> {
     let mut inner = state.inner.lock().map_err(error)?;
     inner.data = store::load_data(&inner.root)?;
     let root = inner.root.clone();
     store::migrate_notes(&root, &mut inner.data)?;
-    let indexes_changed = store::migrate_document_indexes(&root, &mut inner.data)?;
+    let mut warnings = vec![];
+    let ocr_enabled = inner.settings.local_ocr_enabled;
+    let indexes_changed =
+        store::migrate_document_indexes(&root, &mut inner.data, ocr_enabled, &mut warnings)?;
     let metadata_changed = store::migrate_document_authors(&root, &mut inner.data);
     let filenames_changed = store::migrate_document_filenames(&root, &mut inner.data)?;
-    let imported = store::sync_source_documents(&mut inner)?;
+    let imported = store::sync_source_documents(&mut inner, &mut warnings)?;
     if (indexes_changed || metadata_changed || filenames_changed) && imported == 0 {
         store::save_data(&root, &inner.data)?;
     }
-    Ok(inner.data.clone())
+    Ok(LibraryRefreshResult {
+        data: inner.data.clone(),
+        warnings,
+    })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn update_settings(state: State<'_, AppState>, settings: AppSettings) -> Result<(), String> {
     store::save_local_settings(&settings)?;
     state.inner.lock().map_err(error)?.settings = settings;
@@ -68,19 +78,43 @@ fn update_settings(state: State<'_, AppState>, settings: AppSettings) -> Result<
 }
 
 #[tauri::command]
-fn set_library_root(
-    state: State<'_, AppState>,
-    path: String,
-    migrate: bool,
-) -> Result<BootstrapState, String> {
-    {
-        let mut inner = state.inner.lock().map_err(error)?;
-        store::switch_root(&mut inner, PathBuf::from(path), migrate)?;
-    }
-    bootstrap_value(&state)
+fn ocr_status() -> ocr::OcrStatus {
+    ocr::runtime().status()
 }
 
 #[tauri::command]
+async fn setup_ocr(source: String) -> Result<ocr::OcrStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || ocr::runtime().setup(&source))
+        .await
+        .map_err(error)?
+}
+
+#[tauri::command]
+fn cancel_ocr_setup() {
+    ocr::runtime().cancel_setup();
+}
+
+#[tauri::command]
+async fn set_library_root(
+    app: AppHandle,
+    path: String,
+    migrate: bool,
+) -> Result<BootstrapState, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let warnings = {
+            let mut inner = state.inner.lock().map_err(error)?;
+            store::switch_root(&mut inner, PathBuf::from(path), migrate)?
+        };
+        let mut result = bootstrap_value(&state)?;
+        result.warnings = warnings;
+        Ok(result)
+    })
+    .await
+    .map_err(error)?
+}
+
+#[tauri::command(async)]
 fn reveal_path(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let target = state.inner.lock().map_err(error)?.root.clone();
     let target = store::source_dir(&target).to_string_lossy().into_owned();
@@ -101,7 +135,6 @@ async fn import_files(app: AppHandle, paths: Vec<String>) -> Result<Vec<String>,
 #[tauri::command]
 async fn import_web_page(
     app: AppHandle,
-    state: State<'_, AppState>,
     url: String,
     import_id: String,
 ) -> Result<Vec<String>, String> {
@@ -158,14 +191,19 @@ async fn import_web_page(
             "正在保存网页并建立本地索引…"
         },
     );
-    let result = {
+    let import_app = app.clone();
+    let import_path = temporary.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || -> Result<Vec<String>, String> {
+        let state = import_app.state::<AppState>();
         let mut inner = state.inner.lock().map_err(error)?;
-        vec![import_one(&mut inner, &temporary, Some(normalized.clone()))
-            .unwrap_or_else(|value| format!("导入失败：{value}"))]
-    };
+        Ok(vec![import_one(&mut inner, &import_path, Some(normalized))
+            .unwrap_or_else(|value| format!("导入失败：{value}"))])
+    })
+    .await
+    .map_err(error);
     let _ = fs::remove_dir_all(temporary_directory);
     publish_web_import_progress(&app, &import_id, "refreshing", "正在刷新知识目录…");
-    Ok(result)
+    result?
 }
 
 fn publish_web_import_progress(app: &AppHandle, import_id: &str, stage: &str, detail: &str) {
@@ -233,14 +271,14 @@ fn normalize_web_url(value: &str) -> Result<String, String> {
     Ok(parsed.into())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn delete_document(state: State<'_, AppState>, id: Uuid) -> Result<KnowledgeData, String> {
     let mut inner = state.inner.lock().map_err(error)?;
     store::delete_document(&mut inner, id)?;
     Ok(inner.data.clone())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn create_topic(
     state: State<'_, AppState>,
     name: String,
@@ -251,7 +289,7 @@ fn create_topic(
     Ok(inner.data.clone())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn rename_topic(
     state: State<'_, AppState>,
     id: Uuid,
@@ -272,14 +310,14 @@ fn rename_topic(
     Ok(inner.data.clone())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn delete_topic(state: State<'_, AppState>, id: Uuid) -> Result<KnowledgeData, String> {
     let mut inner = state.inner.lock().map_err(error)?;
     store::delete_topic(&mut inner, id)?;
     Ok(inner.data.clone())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn link_document(
     state: State<'_, AppState>,
     document_id: Uuid,
@@ -302,7 +340,7 @@ fn link_document(
     Ok(inner.data.clone())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn move_document(
     state: State<'_, AppState>,
     document_id: Uuid,
@@ -314,7 +352,7 @@ fn move_document(
     Ok(inner.data.clone())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn unlink_document(
     state: State<'_, AppState>,
     document_id: Uuid,
@@ -325,7 +363,7 @@ fn unlink_document(
     Ok(inner.data.clone())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn update_document_name(
     state: State<'_, AppState>,
     id: Uuid,
@@ -348,7 +386,7 @@ fn update_document_name(
     Ok(inner.data.clone())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn search_documents(state: State<'_, AppState>, query: String) -> Result<Vec<Uuid>, String> {
     let inner = state.inner.lock().map_err(error)?;
     Ok(store::search_documents(&inner, &query))
@@ -389,7 +427,7 @@ async fn recommend_topics(
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn apply_recommendations(
     state: State<'_, AppState>,
     document_id: Uuid,
@@ -400,7 +438,7 @@ fn apply_recommendations(
     Ok(inner.data.clone())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn document_payload(state: State<'_, AppState>, id: Uuid) -> Result<ReaderDocumentPayload, String> {
     let inner = state.inner.lock().map_err(error)?;
     store::reader_payload(&inner, id)
@@ -430,7 +468,7 @@ fn overlapping_annotation<'a>(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn add_annotation(
     state: State<'_, AppState>,
     document_id: Uuid,
@@ -464,7 +502,7 @@ fn add_annotation(
     Ok(inner.data.clone())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn update_annotation(
     state: State<'_, AppState>,
     id: Uuid,
@@ -483,7 +521,7 @@ fn update_annotation(
     Ok(inner.data.clone())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn delete_annotation(state: State<'_, AppState>, id: Uuid) -> Result<KnowledgeData, String> {
     let mut inner = state.inner.lock().map_err(error)?;
     inner
@@ -498,7 +536,7 @@ fn delete_annotation(state: State<'_, AppState>, id: Uuid) -> Result<KnowledgeDa
     Ok(inner.data.clone())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn toggle_bookmark(
     state: State<'_, AppState>,
     document_id: Uuid,
@@ -528,7 +566,7 @@ fn toggle_bookmark(
     Ok(inner.data.clone())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn save_summary_note(
     state: State<'_, AppState>,
     note: SummaryNoteInput,
@@ -538,7 +576,7 @@ fn save_summary_note(
     Ok(inner.data.clone())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn delete_summary_note(state: State<'_, AppState>, id: Uuid) -> Result<KnowledgeData, String> {
     let mut inner = state.inner.lock().map_err(error)?;
     if let Some(note) = inner.data.summary_notes.iter().find(|note| note.id == id) {
@@ -554,7 +592,7 @@ fn delete_summary_note(state: State<'_, AppState>, id: Uuid) -> Result<Knowledge
     Ok(inner.data.clone())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn save_conversation(
     state: State<'_, AppState>,
     conversation: Conversation,
@@ -680,41 +718,43 @@ struct ImportPendingResult {
 }
 
 #[tauri::command]
-fn import_pending(
-    state: State<'_, AppState>,
-    paths: Vec<String>,
-) -> Result<ImportPendingResult, String> {
-    let mut inner = state.inner.lock().map_err(error)?;
-    let pending_root = store::pending_dir(&inner.root);
-    let before: std::collections::HashSet<_> = inner
-        .data
-        .documents
-        .iter()
-        .map(|document| document.id)
-        .collect();
-    for relative in paths {
-        let path = inner.root.join(&relative);
-        if !path.starts_with(&pending_root) || !path.is_file() {
-            continue;
+async fn import_pending(app: AppHandle, paths: Vec<String>) -> Result<ImportPendingResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let mut inner = state.inner.lock().map_err(error)?;
+        let pending_root = store::pending_dir(&inner.root);
+        let before: std::collections::HashSet<_> = inner
+            .data
+            .documents
+            .iter()
+            .map(|document| document.id)
+            .collect();
+        for relative in paths {
+            let path = inner.root.join(&relative);
+            if !path.starts_with(&pending_root) || !path.is_file() {
+                continue;
+            }
+            if import_one(&mut inner, &path, None).is_ok() {
+                let _ = fs::remove_file(path);
+            }
         }
-        if import_one(&mut inner, &path, None).is_ok() {
-            let _ = fs::remove_file(path);
-        }
-    }
-    let document_ids = inner
-        .data
-        .documents
-        .iter()
-        .filter(|document| !before.contains(&document.id))
-        .map(|document| document.id)
-        .collect();
-    Ok(ImportPendingResult {
-        data: inner.data.clone(),
-        document_ids,
+        let document_ids = inner
+            .data
+            .documents
+            .iter()
+            .filter(|document| !before.contains(&document.id))
+            .map(|document| document.id)
+            .collect();
+        Ok(ImportPendingResult {
+            data: inner.data.clone(),
+            document_ids,
+        })
     })
+    .await
+    .map_err(error)?
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn discard_pending(state: State<'_, AppState>, paths: Vec<String>) -> Result<(), String> {
     let inner = state.inner.lock().map_err(error)?;
     let pending_root = store::pending_dir(&inner.root);
@@ -727,7 +767,7 @@ fn discard_pending(state: State<'_, AppState>, paths: Vec<String>) -> Result<(),
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn export_document(
     state: State<'_, AppState>,
     document_id: Uuid,
@@ -748,6 +788,9 @@ pub fn run() {
             bootstrap,
             reload_library,
             update_settings,
+            ocr_status,
+            setup_ocr,
+            cancel_ocr_setup,
             set_library_root,
             reveal_path,
             import_files,
@@ -791,6 +834,7 @@ pub fn run() {
             tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
         ) {
             agent::stop_all(&handle.state::<AppState>());
+            ocr::runtime().stop_all();
         }
     });
 }

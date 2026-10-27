@@ -154,6 +154,14 @@ export interface AppSettings {
   libraryVisible: boolean;
   apiContextMode: APIContextMode;
   visionEnabled: boolean;
+  localOcrEnabled: boolean;
+}
+
+export interface OcrStatus {
+  ready: boolean;
+  installing: boolean;
+  detail: string;
+  directory: string;
 }
 
 export interface BootstrapState {
@@ -161,6 +169,12 @@ export interface BootstrapState {
   data: KnowledgeData;
   settings: AppSettings;
   agentAvailability: Record<"claudeCode" | "codex", string | null>;
+  warnings: string[];
+}
+
+export interface LibraryRefreshResult {
+  data: KnowledgeData;
+  warnings: string[];
 }
 
 export interface ReaderDocumentPayload {

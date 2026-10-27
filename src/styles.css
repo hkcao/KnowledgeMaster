@@ -119,6 +119,9 @@ details > summary::-webkit-details-marker { display: none; }
 .document-row.active strong { color: var(--accent-strong); }
 .document-row small { font-size: 10px; }
 .status-line { margin: 0; padding: 5px 9px; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.refresh-warnings { padding: 5px 9px; font-size: 11px; overflow-wrap: anywhere; }
+.refresh-warnings summary { cursor: pointer; }
+.refresh-warnings ul { max-height: 160px; overflow-y: auto; padding-left: 18px; }
 .library-footer { flex: 0 0 34px; display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--border); padding: 0 10px; color: var(--text-muted); background: var(--chrome); font-size: 10px; }
 
 .notes-scroll section > h3 { margin: 9px 6px 5px; color: var(--text-muted); font-size: 11px; }

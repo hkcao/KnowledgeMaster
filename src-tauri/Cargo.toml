@@ -1,6 +1,6 @@
 [package]
 name = "knowledge-master"
-version = "0.2.7"
+version = "0.2.8"
 description = "知屿 KnowledgeMaster - local-first research knowledge workspace"
 authors = ["KnowledgeMaster Contributors"]
 edition = "2021"
@@ -20,7 +20,7 @@ keyring = { version = "3", features = ["apple-native", "windows-native"] }
 lopdf = "0.38"
 pdf-extract = "0.10"
 regex = "1"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 scraper = "0.24"
 serde = { version = "1", features = ["derive"] }

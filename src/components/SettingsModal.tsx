@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { confirm, open } from "@tauri-apps/plugin-dialog";
 import { Eye, FolderOpen, KeyRound, Play, Save, Square, Terminal, X } from "lucide-react";
 import { api } from "../api";
-import type { AppSettings, BootstrapState, ChatBackend, UUID } from "../types";
+import type { AppSettings, BootstrapState, ChatBackend, OcrStatus, UUID } from "../types";
 
 export default function SettingsModal({
   state,
@@ -18,6 +18,27 @@ export default function SettingsModal({
   const [status, setStatus] = useState("");
   const [switchingRoot, setSwitchingRoot] = useState(false);
   const [testingAgent, setTestingAgent] = useState<{ backend: "claudeCode" | "codex"; runId: UUID } | null>(null);
+  const [ocr, setOcr] = useState<OcrStatus | null>(null);
+  const [ocrSource, setOcrSource] = useState("auto");
+  const [startingOcr, setStartingOcr] = useState(false);
+  const [ocrError, setOcrError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    const update = () => api.ocrStatus().then((value) => { if (active) { setOcr(value); setOcrError(""); } })
+      .catch((value) => { if (active) setOcrError(String(value)); });
+    void update();
+    const timer = window.setInterval(() => void update(), 1500);
+    return () => { active = false; window.clearInterval(timer); };
+  }, []);
+
+  async function downloadOcr() {
+    setStartingOcr(true);
+    setOcrError("");
+    try { setOcr(await api.setupOcr(ocrSource)); }
+    catch (value) { setOcrError(String(value)); }
+    finally { setStartingOcr(false); }
+  }
 
   async function persist(next: AppSettings) {
     setSettings(next);
@@ -38,7 +59,7 @@ export default function SettingsModal({
       const next = await api.setLibraryRoot(selected, migrate);
       setSettings(next.settings);
       onState(next);
-      setStatus(`source 目录已切换到 ${next.rootPath}`);
+      setStatus(`source 目录已切换到 ${next.rootPath}${next.warnings.length ? `；已跳过 ${next.warnings.length} 项失败处理，详情见资料目录` : ""}`);
     } catch (value) {
       setStatus(`切换失败：${String(value)}`);
     } finally {
@@ -119,6 +140,22 @@ export default function SettingsModal({
               }}><Play size={14} />测试连接</button>
             </div>
             <p className="muted">只有在直接 API 请求、测试连接、保存或清除时才访问 macOS Keychain / Windows Credential Manager。</p>
+          </fieldset>
+
+          <fieldset>
+            <legend>本地 PDF OCR · MinerU</legend>
+            <label className="check-row"><input type="checkbox" checked={settings.localOcrEnabled} onChange={(event) => persist({ ...settings, localOcrEnabled: event.target.checked })} />PDF 文字提取失败或页面文字不足时，自动使用本地 CPU OCR</label>
+            <p className="muted">Basic ONNX 模式，无需显卡。首次使用需下载约 0.8 GB 模型及独立运行环境，运行库另占空间；模型不包含在安装包内。下载完成后可离线识别，文档在本机处理。</p>
+            <label className="form-row"><span>模型下载源</span><select value={ocrSource} disabled={startingOcr || ocr?.installing} onChange={(event) => setOcrSource(event.target.value)}>
+              <option value="auto">自动选择</option><option value="modelscope">ModelScope</option><option value="huggingface">Hugging Face</option>
+            </select></label>
+            <div className="button-row">
+              <button disabled={!ocr || ocr.ready || startingOcr || ocr.installing} onClick={() => void downloadOcr()}>{ocr?.ready ? "CPU OCR 已就绪" : startingOcr || ocr?.installing ? "正在准备本地 OCR…" : "下载 OCR 模型与运行环境"}</button>
+              {(startingOcr || ocr?.installing) && <button onClick={() => void api.cancelOcrSetup().catch((value) => setOcrError(String(value)))}>取消下载</button>}
+            </div>
+            <p className="muted" role="status">{ocrError || ocr?.detail || (ocr?.ready ? "本地 CPU OCR 已就绪" : "尚未下载；普通文字 PDF 仍可直接导入。")}</p>
+            {ocr?.ready && <p className="muted">刷新目录可重新处理之前跳过的文件。</p>}
+            {ocr && <code className="path-display">{ocr.directory}</code>}
           </fieldset>
 
           <fieldset>

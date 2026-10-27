@@ -87,6 +87,16 @@ If a Release does not yet contain a Windows package, build it from source with t
 
 Download the `.dmg` from [GitHub Releases](https://github.com/hkcao/KnowledgeMaster/releases), open it, drag KnowledgeMaster into Applications, and launch it. Because current builds are not Apple-notarized, macOS may require approval under **System Settings > Privacy & Security** the first time you open the app.
 
+### Local CPU OCR (v0.2.8 and later)
+
+In **Settings > 本地 PDF OCR · MinerU**, download the OCR models and runtime. The app prepares an isolated Python environment, MinerU 4.0.12 and Basic ONNX models without requiring a Python installation or GPU. Models are approximately 0.8 GB; runtime dependencies and installation caches require additional space. Choose automatic model-source selection, ModelScope or Hugging Face. Setup can be cancelled and retried.
+
+Automatic OCR is enabled by default. Text PDFs use native extraction first; parser failures fall back to full-document OCR, while sparse pages are recognized individually with original page numbers preserved. Until models are installed, native extraction remains available. Files requiring OCR remain in place for a later directory refresh. Individual failures do not stop the batch and are listed in the library. Existing empty PDF indexes are retried once OCR is ready.
+
+Inference runs locally in a separate process using local models, without uploading documents. The runtime, models and OCR cache live in the application data directory shown in Settings, outside the installer and synchronized library. Cache keys include source hashes, engine version and page selection; extracted text uses the existing library index. Disable automatic OCR to use native extraction only. CPU speed depends on document length and layout; check complex formulas and tables against the original.
+
+Local OCR uses [MinerU](https://github.com/opendatalab/MinerU) and [uv](https://github.com/astral-sh/uv), subject to their upstream and model licenses. KnowledgeMaster itself remains MIT-licensed.
+
 ## Build from Source
 
 ### Windows

@@ -1,12 +1,14 @@
 # KnowledgeMaster 开发交接
 
-更新日期：2026-10-26（Asia/Shanghai）
+更新日期：2026-10-27（Asia/Shanghai）
 
 本文档供后续 Codex/开发者在新窗口中继续工作。开始前请以实际 `git status`、远端分支、GitHub Actions 和 Release 为准；本文记录的是上述日期核验过的状态。
 
 本项目使用个人 `project-handoff` Skill（`/Users/hank/.codex/skills/project-handoff`）持续维护本文档。发生重要决策、实现、验证、发布或工作区状态变化时更新同一文件，不创建按日期重复的交接文档。
 
 ## 0. 首轮 Windows PDF 刷新闪退修复（2026-10-26）
+
+本节及 0.1 节保留首轮修复时的历史记录；当前 Git/发布状态见 0.2 节，逐文件容错见 0.3 节，CPU OCR 见 0.4 节，本次提交/发布进度见 0.5 节。历史“失败即返回”行为已由 0.3 节替代。
 
 - **用户报告**：Windows 11、`0.2.6` portable，把任意 PDF 复制到资料库 `source/` 后点击刷新目录，应用退出。当前开发机为 macOS，仅安装 `aarch64-apple-darwin` Rust target；尚未在 Windows 真机复现或确认修复。
 - **确认的代码缺陷**：`reload_library` / `import_files` 原为同步 Tauri command；`extract_path` 直接调用 `pdf-extract 0.10.0`，未隔离解析器 panic。不支持的字体编码可以触发 `pdf-extract/src/lib.rs:359` 的 `unexpected encoding` panic，并沿持有资料库 Mutex 的命令栈传播。新增测试在修复前确实失败，修复后通过。这是已复现的缺陷，不等于已证明用户“任意 PDF”闪退的唯一原因。
@@ -28,13 +30,47 @@
 - **当前验证**：`cargo test --locked --manifest-path src-tauri/Cargo.toml` 36/36；`cargo test --locked --release --manifest-path src-tauri/Cargo.toml --lib` 36/36；`npm test` 14/14；`npm run build` 成功；fmt/diff 检查通过。新增覆盖数据版本 5/6/7、缺失 authors、`sourceURL`、完整关系/会话/批注往返、JSON 备份字节不变、重复加载幂等、旧索引直接复用、嵌套原件路径、三种坏/缺索引恢复、重建失败无破坏；现有 chunk 测试补充旧版本号失效重建。大小写路径断言按 canonicalize 比较，以适配 macOS/Windows 常见的大小写不敏感文件系统。
 - **当前 CI**：生产构建后执行 `cargo test --locked --release --manifest-path src-tauri/Cargo.toml --lib`，覆盖所有迁移和 PDF 测试；本机成功不代表 Windows UI 验证成功。尚无用户现场资料库或 Windows 异常日志，仍不能认定旧索引是“任意 PDF 闪退”的唯一原因。
 
-### 0.2 v0.2.7 构建发布（进行中）
+### 0.2 v0.2.7 构建发布（已核验完成）
 
 - 用户已明确授权提交 GitHub、构建并发布新的 Windows 版本，下载后自行测试。
 - 版本文件已同步到 `0.2.7`：`package.json`、`package-lock.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`、`src-tauri/tauri.conf.json`。不改动依赖版本、SQLite schema 或数据版本。
 - `0.2.7` 提交前重新验证：前端 14/14、Rust Debug 36/36、Release 36/36、生产前端构建、fmt、diff 检查全部通过；六处应用版本字段均为 `0.2.7`。
-- 提交前远端 `tauri-codex` 仍为 `566cdff1`，`v0.2.7` 不存在；现有最新正式 Release 为 `v0.2.6`。
-- 计划提交并推送修复和版本，创建新 `v0.2.7` 标签触发既有跨平台工作流。Windows 作业生成 portable EXE 与 NSIS 安装包；工作流还会生成 macOS DMG。构建、CI 和公开 Release 尚待执行核验，不能据本地测试认定已发布。
+- 修复/发布提交 `10b70887eb206a8ca51b834d9c55465e32d2ef06` 已推送到 `tauri-codex`，新 annotated tag `v0.2.7` 同时推送，未移动旧标签。首次沙箱 `git add` 因 `.git/index.lock: Operation not permitted` 失败，获得 Git 元数据写入授权后重试成功。
+- 标签发布工作流为 <https://github.com/hkcao/KnowledgeMaster/actions/runs/40299317837>；重复的分支工作流 `40299318297` 已发起取消，只保留标签流水线。Windows 作业生成 portable EXE 与 NSIS 安装包，macOS 作业生成 DMG。2026-10-27 实时读取确认该标签流水线已 completed/success。
+- 2026-10-27 `gh release view v0.2.7` 确认公开正式 Release 已于 2026-10-26 09:39:42 UTC 发布，非草稿、非预发布：<https://github.com/hkcao/KnowledgeMaster/releases/tag/v0.2.7>。附件均已 uploaded：portable EXE 22,475,264 bytes（SHA-256 `b2b62fd8e2a6fd92cbd03609f7b8a9ccebcb19519aa3f6817aad801dafa63c82`）；NSIS `KnowledgeMaster_0.2.7_x64-setup.exe` 7,010,629 bytes；DMG `KnowledgeMaster_0.2.7_aarch64.dmg` 9,184,201 bytes。`git ls-remote` 确认远端分支和 `v0.2.7^{}` 均指向 `10b70887`。这些安装包不包含下一节本地新修复。
+
+### 0.3 目录刷新逐文件容错（2026-10-27，本地完成，未发布）
+
+- **用户报告与目标**：新复制的 PDF 刷新后没有显示；确认是否单文件错误中断，以及字体/结构异常的来源和替代解析方案。
+- **已复现**：新增两个回归测试在修改前均失败。`sync_source_documents` 对 `import_one_with_storage` 使用 `?`，遇到第一个坏 PDF 就终止；`migrate_document_indexes` 同样会因单个旧索引重建失败而阻止新文件扫描。前端只在整个 command 成功后更新列表，已经成功入库的文件也可能暂时不可见。文件选择器/目录导入的 `import_paths` 原本已逐文件继续，本轮保留。
+- **实现**：`store.rs` 将单文档修复提取为 `migrate_document_index`，失败时记录包含文件名的 warning，继续后续索引；成功后才更新该文档路径元数据。`sync_source_documents` 记录单文件导入失败后继续扫描。`reload_library_data` / command 返回 `LibraryRefreshResult { data, warnings }`，成功数据正常持久化并返回。切换资料库也保留并返回 warnings；数据库加载、目录初始化等全局失败仍返回错误。
+- **界面**：`App.tsx`、`api.ts`、`types.ts` 配合新的刷新结果；`LibrarySidebar.tsx` 刷新/导入共用刷新回调，在目录底部显示可展开的失败数量、文件名和原因，并在后续成功刷新时清除已解决警告；`SettingsModal.tsx` 提示切换目录时的失败处理数量。失败原件留在原位、不会生成空占位文档，后续刷新可重试；失败的旧文档仍保留现有元数据。未修改用户资料库。
+- **解析异常证据**：本地锁定的 `pdf-extract 0.10.0/src/lib.rs:354-359` 对 `MacRomanEncoding`、`MacExpertEncoding`、`WinAnsiEncoding` 之外进入此函数的编码名直接 `panic!("unexpected encoding ...")`。旧中文提示只是 `extract_path` 线程 `join` 失败时写死的猜测，不是文件损坏诊断。现改为“文本解析器内部异常”并保留 panic 原因。尚未拿到用户失败 PDF，不能确认该文件具体编码或结构。
+- **替代方案（仅调研，未实现）**：阅读器已用 PDF.js 渲染与文字层，可考虑通过 `PDFPageProxy.getTextContent()` 做逐页备用提取；扫描件无文字层时再用 OCR。官方参考：<https://mozilla.github.io/pdf.js/api/draft/module-pdfjsLib-PDFPageProxy.html>、<https://ocrmypdf.readthedocs.io/en/latest/cookbook.html>。本轮没有更换依赖、接入备用引擎/OCR 或改变原件。
+- **验证**：`cargo test --locked --manifest-path src-tauri/Cargo.toml` 38/38；`cargo test --locked --release --manifest-path src-tauri/Cargo.toml --lib` 38/38；`npm test` 2 个文件、16/16；`npm run build` 成功（既有 >500 kB bundle 提示）；fmt/diff 检查通过。混合批次覆盖 panic PDF、损坏 PDF、正常 PDF/TXT、再次刷新无重复、失败文件/旧索引保留、后续旧索引继续恢复、新文件 SQLite 持久化和检索。`src/App.test.tsx` 覆盖局部失败后显示新增资料与失败详情、重刷清除 warnings、全局错误仍显示刷新失败。首次组件测试遇到 Node 25/jsdom 的 localStorage 接口缺失及 fixture 字段错误，已仅修正测试环境 mock 和 fixture；未修改产品 localStorage 逻辑。
+- **交付与后续**：版本仍为 `0.2.7`；本节代码、测试和文档均为本地未暂存修改，无本轮提交、推送、新标签或安装包。未在 Windows 真机或真实用户失败 PDF 验证。下一步若用户要求交付，使用新版本/标签生成 Windows 包，并验证混合好坏 PDF 刷新与失败重试；若继续解决具体文件兼容性，先取得可分享的失败 PDF/完整错误，再评估 PDF.js 备用提取。
+
+### 0.4 内置按需下载的 MinerU CPU OCR（2026-10-27，本地完成，未发布）
+
+- **用户要求与选择**：默认集成本地 OCR（以 MinerU 为例），最小可用模型支持 CPU；应用安装后联网下载模型，安装包不携带权重。核验官方当前 PyPI 版本为 `mineru 4.0.12`，采用 `basic` + `onnx`；只下载 `MinerU-4_models_onnx` 小模型集，不下载 Standard/Advanced 所需 VLM。官方约 0.8 GB 是模型量级，不含运行库；macOS ARM64 的上游基础依赖还会安装 Torch，但本应用强制 ONNX/CPU 推理。
+- **运行环境与下载**：新增 `src-tauri/src/ocr.rs`、`ocr_worker.py`（通过 `include_str!` 编入应用）。固定 uv `0.13.6`，为 Windows x64、macOS ARM64/x64 选择官方 Release 归档并核验固定 SHA-256；下载独立 Python 3.12，创建私有 venv 并安装 `mineru==4.0.12`。没有修改系统 Python/PATH 或用户现有 MinerU 配置。模型源可选 `auto` / `modelscope` / `huggingface`；setup 子进程支持取消、超时和失败重试，已有下载缓存由上游复用。完整安装校验成功后清理应用私有 uv 安装缓存。
+- **就绪与目录**：运行目录为 `dirs::data_local_dir()/KnowledgeMaster/ocr/4.0.12-basic-onnx-v1`，设置中显示绝对路径；模型、Python、运行库和 OCR 缓存不进入安装包、同步资料库或 Git。setup 检查指定 MinerU 版本、ONNX CPU provider、上游完整模型清单后生成 `ready.json`；状态检查拒绝缺失/尺寸变化/越界模型路径。首次启动/打开设置只读状态；用户点击下载按钮后才下载运行环境和模型，普通文字 PDF 不依赖下载。
+- **解析与缓存**：新增设置 `localOcrEnabled`，默认 true，旧 settings 缺字段时也默认 true。`store::extract_for_import` 在 PDF 原生提取失败后 OCR 全文，对原生页中少于 16 个字母/数字的页尝试选页 OCR；保留正常原生页及原页码。OCR 没有准备好/失败时，全空文档保留原位并显示错误；已有可用原生文本时保留原生结果，不因稀疏/空白页 OCR 失败而丢弃整篇。普通新导入、目录刷新、网页 PDF、待确认下载及索引重建共用入口；旧兼容索引正文全空时，也会在模型就绪后重建。没有全量强制重建所有旧索引。
+- **页码与边界**：原生 PDF 改用 `pdf_extract::extract_text_by_pages`，修复过滤空白页后后续页码前移的问题。Python SDK 使用 stateless `parse(tier="basic", ocr_mode="ocr", image_analysis=False, page_range=...)`，按 `page_idx + 1` 写回现有 `{text,pages}` 索引结构。OCR 缓存键包括源文件 SHA-256、固定引擎/适配器版本和页范围；OCR 语言由固定 ONNX 模型集决定，无用户语言配置。识别时强制 local 模型源并设置 hub offline，不使用远程 API，不修改原 PDF 或添加文字层。SQLite schema/data version 均未变。
+- **进程与界面**：`setup_ocr` 在后台安装，`ocr_status` 可独立查询进度，`cancel_ocr_setup` 取消安装；设置页每 1.5 秒读取状态，关闭再打开设置可继续查看。长时间 OCR 位于受控独立进程，超时 30 分钟；安装进程独立超时，取消/退出时终止应用自身子进程树。切换资料库、网页导入与待确认导入也转入 `spawn_blocking`；需要资料库锁的同步 Tauri 命令加 `#[tauri::command(async)]`，避免在 WebView 线程等待 OCR 持有的锁。资料库修改仍串行，相关元数据操作会等待本轮处理结束。
+- **验证**：最新全量 Rust Debug/Release 各 44 项通过、1 项联网 CPU smoke 默认 ignored；前端 3 个测试文件 18/18；生产前端构建、fmt/diff 检查通过。Clippy 完成，仅保留原有 5 条 warning，无新增 warning。新增回归覆盖旧设置默认开关、原生提取免 OCR、原生异常回退、空 OCR 拒绝、部分页合并、空白首页页码、模型清单无效/缺失、子进程超时取消、设置页按需下载/选择源/取消/重试。普通 CI 不下载大模型。
+- **真实 CPU 证据**：手动执行 `cargo test --locked --manifest-path src-tauri/Cargo.toml --lib real_cpu_ocr_smoke -- --ignored --nocapture`，从零下载 Python、依赖和模型，再识别程序生成的两页英文扫描 PDF，页码为 1/2，识别文字正确且二次调用缓存命中；全流程 250.80 秒。随后复用安装环境但生成新扫描件，CPU 识别 3.2809 秒，完整 smoke 3.50 秒；不能据此推断复杂论文速度。模型目录 `du -sh` 约 833 MiB，测试运行环境连安装缓存约 3.3 GiB（上游依赖与 Python 另占空间）。不接触用户资料库或原件。
+- **UI 与测试产物**：用真实 React 设置组件 + 模拟 IPC 的临时 localhost 预览检查 OCR 下载/就绪状态和排版；截图 `/tmp/knowledgemaster-ocr-ui.jpg`。这是 UI 预览，不是 Windows 真机验收。临时预览页和 Vite 服务已清理。首次真实 smoke 在 `src-tauri/target/ocr-smoke` 生成的运行环境/模型/合成 PDF 已清理，避免 Python 包中的 HTML 干扰 Vite 扫描；联网 smoke 的后续目录改为系统临时目录 `KnowledgeMaster-ocr-smoke`。
+- **交付与风险**：仍为 `0.2.7` 本地未暂存源码；OCR 和 0.3 节容错修复均未提交/推送/打包，线上 v0.2.7 不含这些变更。Windows 分支已实现但未运行真实下载安装/识别；macOS 本机实测为 Apple Silicon。模型下载速度/成功率取决于网络，CPU 时间取决于文档大小；复杂布局/公式/表格尚无真实论文质量基线，扫描件阅读器的原 PDF 仍没有可选文字层。README 中英文已说明入口、下载、存储与许可；MinerU/uv 和模型适用其上游许可，项目 MIT 不替代上游许可。
+- **下一步**：按用户后续授权生成新版本/标签的 Windows 包，在干净 Windows 11 上验证无 Python/无 GPU的一键安装、ModelScope 源、取消重试、离线扫描 PDF 入库、混合好坏 PDF 的批量刷新以及退出清理。若要优化体积/质量，再基于真实论文语料度量；不要默认升级到 VLM/全量 GPU 依赖。
+
+### 0.5 v0.2.8 提交与发布（2026-10-27，进行中）
+
+- 用户已明确授权“提交 GitHub 仓库，然后发布 Windows 版本”。本节发布包含 0.3 节逐文件容错与 0.4 节本地 CPU OCR，不覆盖旧 v0.2.7 标签或附件。
+- 发布准备开始时，本地 HEAD 与远端 `tauri-codex` 均为 `10b70887`，公开最新 Release 为 `v0.2.7`，远端没有 `v0.2.8`。此前开发的未暂存/未跟踪文件属于本次交付，已逐项检查；不提交模型、虚拟环境、用户资料或临时截图。
+- 五处版本文件（package/package-lock、Cargo 清单/锁、tauri.conf）共六处应用版本同步到 `0.2.8`；README OCR 入口标明从 v0.2.8 起提供。
+- 既有标签工作流继续构建 Windows portable EXE、NSIS 安装包及 macOS DMG。新增仅在 Windows 版本标签发布时运行的真实 CPU OCR smoke（20 分钟上限），在附件上传/发布之前从零安装隔离环境、下载模型、识别两页扫描 PDF 并验证缓存；普通分支/PR CI 不下载模型。
+- 提交前复验通过：`npm test` 3 文件 18/18，`npm run build` 成功（既有 >500 kB bundle 提示），Rust Debug/Release 各 44/44（联网 smoke 单列 ignored），fmt/diff 检查通过；六处应用版本均为 `0.2.8`，Tauri 未配置 OCR 模型或运行环境 bundle resources。此记录随功能和版本提交；提交 ID 与推送结果待下文补充。目前没有 v0.2.8 安装包。下一步：提交推送并创建新标签，等待 Windows OCR smoke 和构建完成，核验公开 Release 附件与 SHA-256。
 
 ## 1. 项目定位与不可破坏的约束
 
@@ -61,9 +97,9 @@
 - 本地目录：`/Users/hank/Desktop/知识整理器`
 - GitHub：`https://github.com/hkcao/KnowledgeMaster`
 - 仓库：Public，MIT License
-- 当前分支：`tauri-codex`；2026-10-26 提交前 `git ls-remote` 确认本地 HEAD 与远端分支均为 `566cdff14c4e6644f9ad1fbcc234f8934c6dd071`（`docs: record v0.2.6 release status`）。本轮修复与 `0.2.7` 版本变更待提交；发布进度见 0.2 节。
-- 当前线上发布提交：`c0a52f5f9f1b81c12c6f498bb61b7135c2cc4f86`（`release: prepare v0.2.6 Windows test build`）。
-- 当前公开正式版本/标签：`v0.2.6`
+- 当前分支：`tauri-codex`；2026-10-27 核验本地 HEAD、远端分支及发布标签 `v0.2.7^{}` 均为 `10b70887eb206a8ca51b834d9c55465e32d2ef06`。
+- 当前线上发布提交：`10b70887`（`fix: isolate PDF parsing and recover legacy indexes for v0.2.7`）。
+- 当前公开正式版本/标签：`v0.2.7`；本地新增容错与 CPU OCR 修复尚未提交/发布。
 - 2026-10-26 再次核验：`refs/tags/v0.2.6^{}` 仍指向 `c0a52f5f`，分支 tip 为后续 docs-only 提交 `566cdff1`，并非发布二进制的提交。
 - 2026-09-11 实时核验：本地 `main`、本地 `origin/main` 和远端 `refs/heads/main` 都指向 `ab4ff5a0`。
 - `v0.2.5` 是 annotated tag，解引用后的发布提交为 `78b4b95b6a5d9a40fa9327839510321411d715af`。
@@ -78,7 +114,7 @@
 
 ## 3. 已发布状态与待发布差异
 
-当前公开 Release：<https://github.com/hkcao/KnowledgeMaster/releases/tag/v0.2.6>
+当前公开 Release 为 `v0.2.7`，见 0.2 节；以下保留 `v0.2.6` 发布证据。
 
 2026-10-26 通过 `gh release view v0.2.6` 再次核验，`v0.2.6` 为非草稿、非预发布版本，实际附件名称、大小与摘要仍为：
 
@@ -136,7 +172,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 ## 5. 最近一次本地验证结果
 
-2026-10-26 当前最终修复验证见第 0.1 节。以下为 2026-09-11 发布基线的历史验证：
+2026-10-27 当前功能验证见第 0.4 节；v0.2.8 提交/发布复验见 0.5 节。以下为 2026-09-11 发布基线的历史验证：
 
 - 2026-09-11 基线 `npm test`：1 个测试文件，12 项测试通过；测试优化后再次执行为 1 个测试文件、14 项测试通过。
 - 2026-09-11 `cargo test --manifest-path src-tauri/Cargo.toml`：29 项 Rust 测试通过（原基线 28 项）。
@@ -286,14 +322,16 @@ GitHub Actions 文件：`.github/workflows/tauri-ci.yml`
 
 ## 11. 当前工作树和本轮变更
 
-2026-10-26 开始时工作树干净；发布准备阶段有十一个未暂存修改，无暂存或未跟踪文件：
+2026-10-27 开始时仅 `docs/HANDOFF.md` 有上一轮未暂存发布进度，本轮保留并补充其状态。本轮当前未暂存文件为 `src-tauri/src/{lib,models,store}.rs`、`src/App.tsx`、`src/api.ts`、`src/types.ts`、`src/components/{LibrarySidebar,SettingsModal}.tsx`、`src/styles.css` 和本文档；另有未暂存 `README.md`、`README.en.md`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`（仅启用 reqwest blocking 功能，不升级依赖版本）；未跟踪文件为 `src/App.test.tsx`、`src/components/SettingsModal.test.tsx`、`src-tauri/src/ocr.rs`、`src-tauri/src/ocr_worker.py`。无暂存内容。本轮未提交、推送或打包。
+
+下面是已提交为 `10b70887` 的 2026-10-26 首轮修复历史清单，不能视作当前未提交文件清单：
 
 - `src-tauri/src/lib.rs`：后台刷新/导入及可测试刷新函数。
 - `src-tauri/src/store.rs`：PDF 解析线程与错误转换，旧原件/索引兼容、刷新恢复、作者保护，六项 PDF 回归测试及 chunk 旧版本测试。
 - `src-tauri/src/models.rs`：兼容旧 `sourceURL` 字段。
 - `src-tauri/src/database.rs`：数据版本 5/6/7 的完整关系与备份迁移测试。
 - `.github/workflows/tauri-ci.yml`：生产模式 Rust 库测试（含迁移/PDF）。
-- `docs/HANDOFF.md`：本轮证据、未确认事项与后续步骤；本文档自身也未提交、未暂存。
+- `docs/HANDOFF.md`：首轮修复证据；后续发布进度和 0.3 节目前仍未提交、未暂存。
 - 五处版本文件（见 0.2 节）：应用版本同步到 `0.2.7`。
 
 当前本地 `dist/`、`src-tauri/target/` 等仍被忽略；本轮重新构建了前端和 macOS Rust debug/release 测试程序，未生成 Windows EXE、NSIS 或新 DMG。
@@ -309,7 +347,7 @@ GitHub Actions 文件：`.github/workflows/tauri-ci.yml`
 
 当时发布后的交接更新已提交为 `566cdff1`；标签继续固定在已构建的 `c0a52f5f`。
 
-当前下一步是 Windows 11 portable 验收第 0/0.1 节修复：在旧资料库副本中确认 JSON 自动迁移、批注/主题/书签保留；损坏索引刷新后产生备份并恢复检索；再把普通 PDF 复制到 `source/`，刷新后确认入库、可阅读、再次刷新无重复；不支持字体的测试文件应显示错误且窗口仍可操作。如仍闪退，收集 Windows 事件查看器中的异常代码、故障模块及 WebView2 版本，以区分 Rust panic、栈溢出和 WebView2 进程退出；目前尚未取得这些现场证据。
+当前下一步按 0.5 节发布安排；Windows 11 portable 后续验收应同时覆盖第 0/0.1 节：在旧资料库副本中确认 JSON 自动迁移、批注/主题/书签保留；损坏索引刷新后产生备份并恢复检索；再把普通 PDF 复制到 `source/`，刷新后确认入库、可阅读、再次刷新无重复；不支持字体的测试文件应在失败明细中显示错误、其他正常文件继续入库且窗口仍可操作（须先构建含 0.3 节修复的新包）。如仍闪退，收集 Windows 事件查看器中的异常代码、故障模块及 WebView2 版本，以区分 Rust panic、栈溢出和 WebView2 进程退出；目前尚未取得这些现场证据。
 
 ## 12. 新窗口建议开场提示
 

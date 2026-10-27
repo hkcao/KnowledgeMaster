@@ -50,10 +50,10 @@ export default function App() {
       if (event.payload.type === "drop" && event.payload.paths.length) {
         const paths = event.payload.paths;
         void api.reload().then(async (before) => {
-          const previous = new Set(before.documents.map((document) => document.id));
+          const previous = new Set(before.data.documents.map((document) => document.id));
           await api.importFiles(paths);
-          const data = await api.reload();
-          setState((value) => value ? { ...value, data } : value);
+          const { data, warnings } = await api.reload();
+          setState((value) => value ? { ...value, data, warnings } : value);
           setExternalRecommendationIds(data.documents.filter((document) => !previous.has(document.id)).map((document) => document.id));
         });
       }
@@ -154,10 +154,11 @@ export default function App() {
       settings={settings}
       currentDocumentId={currentId}
       externalRecommendationIds={externalRecommendationIds}
+      refreshWarnings={state.warnings}
       onData={updateData}
       onReload={async () => {
-        const data = await api.reload();
-        updateData(data);
+        const { data, warnings } = await api.reload();
+        setState((value) => value ? { ...value, data, warnings } : value);
         return data;
       }}
       onExternalRecommendationsHandled={() => setExternalRecommendationIds([])}

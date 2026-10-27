@@ -39,6 +39,10 @@ jobs:
       - run: npm run tauri build -- --bundles ${{ matrix.bundle }}
       - name: Test library migrations and PDF refresh in release mode
         run: cargo test --locked --release --manifest-path src-tauri/Cargo.toml --lib
+      - name: Verify Windows CPU OCR installation and inference
+        if: runner.os == 'Windows' && startsWith(github.ref, 'refs/tags/v')
+        timeout-minutes: 20
+        run: cargo test --locked --release --manifest-path src-tauri/Cargo.toml --lib real_cpu_ocr_smoke -- --ignored --nocapture
       - name: Prepare portable Windows executable
         if: runner.os == 'Windows'
         shell: pwsh

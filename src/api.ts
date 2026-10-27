@@ -8,6 +8,8 @@ import type {
   Conversation,
   KnowledgeAnnotation,
   KnowledgeData,
+  LibraryRefreshResult,
+  OcrStatus,
   ReaderDocumentPayload,
   ReaderQuote,
   SummaryNote,
@@ -17,8 +19,11 @@ import type {
 
 export const api = {
   bootstrap: () => invoke<BootstrapState>("bootstrap"),
-  reload: () => invoke<KnowledgeData>("reload_library"),
+  reload: () => invoke<LibraryRefreshResult>("reload_library"),
   updateSettings: (settings: AppSettings) => invoke<void>("update_settings", { settings }),
+  ocrStatus: () => invoke<OcrStatus>("ocr_status"),
+  setupOcr: (source: string) => invoke<OcrStatus>("setup_ocr", { source }),
+  cancelOcrSetup: () => invoke<void>("cancel_ocr_setup"),
   setLibraryRoot: (path: string, migrate: boolean) =>
     invoke<BootstrapState>("set_library_root", { path, migrate }),
   revealPath: () => invoke<void>("reveal_path"),

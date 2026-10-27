@@ -369,6 +369,8 @@ pub struct AppSettings {
     pub api_context_mode: String,
     #[serde(default)]
     pub vision_enabled: bool,
+    #[serde(default = "default_true")]
+    pub local_ocr_enabled: bool,
 }
 
 impl Default for AppSettings {
@@ -382,6 +384,7 @@ impl Default for AppSettings {
             library_visible: true,
             api_context_mode: fragments(),
             vision_enabled: false,
+            local_ocr_enabled: true,
         }
     }
 }
@@ -412,6 +415,14 @@ pub struct BootstrapState {
     pub data: KnowledgeData,
     pub settings: AppSettings,
     pub agent_availability: HashMap<String, Option<String>>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryRefreshResult {
+    pub data: KnowledgeData,
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
