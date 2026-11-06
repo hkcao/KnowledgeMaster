@@ -6,6 +6,37 @@
 
 KnowledgeMaster brings paper collection, close reading and annotation, research notes, multi-document Q&A, and knowledge synthesis into one desktop application. Your documents and metadata stay on your own disk by default. AI can access only the scope you explicitly authorize, and only when you initiate a request.
 
+> This page describes the `main` source branch. Full-document translation, the knowledge graph, and the blue theme are available in source; the current public `v0.2.8` packages do not include these additions. Check the notes for the Release you download.
+
+## Interface Tour
+
+These screenshots show the current Chinese-language UI with synthetic documents and notes. Translations are demonstration content, with no private data.
+
+### Bilingual reading with shared images
+
+Choose full Chinese translation during import or translate an existing document from the reader. The original and the separate Chinese document share image resources. Switch between alternating paragraphs and parallel panes with paragraph-based synchronized scrolling.
+
+![Original and Chinese documents side by side with shared figures and synchronized scrolling](docs/images/bilingual-reading.png)
+
+### Click a note to expand only that item
+
+Search notes and annotations directly. Clicking a card expands its content, source excerpt, and editing actions in the list; clicking again collapses it. The current document stays open, and the graph does not open automatically.
+
+![An expanded note in the sidebar while the current document remains open in the reader](docs/images/note-expanded.png)
+
+### Open the knowledge graph through its own button
+
+Only the Knowledge Graph button opens the relationship workspace. Selecting a note or annotation highlights its connected chain or direct neighbors. Create or remove links manually, or ask the configured model for suggestions with explanations and confirm the ones to save.
+
+![A separate knowledge graph highlights the selected note and related nodes while dimming unrelated items](docs/images/knowledge-graph.png)
+
+## Quick Start
+
+1. **Import** files, folders, or web pages and optionally translate them into Chinese. Download the local OCR models in Settings for scanned PDFs.
+2. **Read and capture** the original or bilingual document, annotate selected text, and save your thoughts as Markdown notes.
+3. **Search and expand** items in the Notes tab to read their full content and source excerpts.
+4. **Connect and ask** through the separate knowledge graph and Agent chat. Agent mode includes the current document by default; clear it or add other documents and topics as needed.
+
 ## Features
 
 ### Research Library
@@ -43,7 +74,7 @@ KnowledgeMaster brings paper collection, close reading and annotation, research 
 - Select multiple documents or topics as the Q&A scope. Agent mode creates an isolated temporary workspace for that scope.
 - Agents receive read-only copies of original files and can reuse existing PDF, OCR, or parsing caches instead of relying on pre-chunked text.
 - Activating an Agent or starting a new Agent conversation selects the currently displayed document by default. The selection follows the current tab and can be cleared in the scope picker or document chip.
-- With no selected text, files, or topics, chat starts without loading local documents.
+- Chat loads no local context when there is no quote, selected document/topic, or automatically included current document. Direct API mode starts with an empty scope.
 - Files downloaded by an Agent enter a pending-import area. The user confirms both the import and its virtual topics.
 - Preserve conversation history and generate incremental Markdown summaries.
 
@@ -169,15 +200,19 @@ Production packages should be built on their target operating system. `.github/w
 <library>/
 ├── knowledge.db                   # SQLite metadata
 ├── knowledge.json.migrated-v8.bak # Created only during a legacy migration
+├── index/assets/                  # HTML/Markdown image reference maps
 └── source/
-    ├── documents/                 # Imported source files
-    ├── downloads/pending/         # Agent downloads awaiting confirmation
-    ├── generated/agent-cache/     # Reusable parsing and OCR results
-    ├── index/                     # Locally extracted text
-    └── notes/                     # Summary notes in Markdown
+    ├── documents/                # Originals and separate Chinese documents
+    ├── assets/                   # Images shared by originals and translations
+    ├── downloads/pending/        # Agent downloads awaiting confirmation
+    ├── generated/                # agent-cache/ parsing cache and chunks/ cache
+    ├── index/                    # Extracted text and translations/ alignment
+    └── notes/                    # Markdown notes
 ```
 
 macOS and Windows use the same relative paths and SQLite schema. A library can live in a synced folder, but it should not be opened for concurrent modification on multiple devices.
+
+Current source upgrades schema 1 libraries to schema 2 to add note relationships. Back up the library before upgrading; older packages cannot open an upgraded library.
 
 ## Agent Setup
 

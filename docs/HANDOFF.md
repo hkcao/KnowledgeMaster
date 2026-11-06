@@ -129,6 +129,15 @@
 - CI 已启动：[Tauri desktop / 42175684019](https://github.com/hkcao/KnowledgeMaster/actions/runs/42175684019)，对应上述功能提交，查询时为 `in_progress`，尚不能声称 Windows/macOS CI 已通过。
 - 本节为功能推送后的 docs-only 交接补记，随紧接的文档提交交付，并使用 `[skip ci]` 避免重复构建；最新分支 tip 以 `git log` / `git ls-remote` 核对。用户本地 r2 包不变，公开 Release 仍沿用 0.5 节历史核验，本轮没有发布安装包。
 
+### 0.11 同步 main 与 README 图示（2026-11-06，准备推送）
+
+- 用户要求“推送到 main 分支，同时更新 README 并带图示意”。已确认远端 `main` 为 `ab4ff5a0`、`tauri-codex` 为 `4f6726d7`，main 没有独有提交且落后 7 个提交；fetch 后切到本地 main，通过 `git merge --ff-only origin/tauri-codex` 保留历史快进，不强推。同步范围包含此前 PDF/OCR 修复和 0.6–0.9 节功能。
+- `README.md` / `README.en.md` 新增界面示意、四步快速上手、源码与公开 v0.2.8 的区别；修正默认 Agent 上下文描述并补充共享图片、译文对齐文件、schema 2 升级说明。2026-11-06 实时 `gh release view` 确认当前公开正式版为 v0.2.8，发布于 2026-10-27；本轮不创建新标签或 Release。
+- 新图位于 `docs/images/bilingual-reading.png`、`note-expanded.png`、`knowledge-graph.png`。基于当前真实 React App 截图，使用合成文档/笔记和示例译文，不访问私人资料库；截图分别展示保留图表的双语阅读、卡片只展开内容且中央阅读器保持不变，以及独立图谱的关联链高亮。每张 1460×900，共约 550 KiB，中英文 README 复用同一组图。
+- 图示实际浏览器检查无页面错误；图谱样例 1 个选中节点、4 个关联节点。两份 README 的 3 张图片路径、PNG 格式与尺寸、本地链接和代码块配对已验证，`git diff --check` 通过。临时预览源码与 Vite 服务已清理。本轮只有文档和图片变化，没有重复运行功能测试；前端 39/39、Rust 52 passed / 1 ignored 的代码验证沿用前节。
+- 此刻本地 main 已同步代码，README/图片/本节记录待提交推送；操作成功后补记提交号与远端状态。tauri-codex 保留为已推送功能分支，不改写它的历史。
+- 重新查询发现 0.10 节功能分支流水线 `42175684019` 已 `completed/cancelled`，取消原因未核实；这不是测试通过的证据。本轮不重新运行旧分支任务，main 推送会按既有工作流启动自己的 CI。
+
 ## 1. 项目定位与不可破坏的约束
 
 知屿 KnowledgeMaster 是面向科研论文学习的本地优先桌面知识工作台，正式实现同时支持 macOS 和 Windows。
