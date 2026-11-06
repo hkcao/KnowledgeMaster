@@ -18,6 +18,12 @@ Choose full Chinese translation during import or translate an existing document 
 
 ![Original and Chinese documents side by side with shared figures and synchronized scrolling](docs/images/bilingual-reading.png)
 
+### Choose the translation backend independently
+
+In Settings, choose direct API (default) or a detected Claude Code / Codex CLI for translation, independently from chat. Search covers both languages and opens the original; the directory lists one article.
+
+![Document translation settings are independent from chat and default to direct API](docs/images/translation-settings.png)
+
 ### Click a note to expand only that item
 
 Search notes and annotations directly. Clicking a card expands its content, source excerpt, and editing actions in the list; clicking again collapses it. The current document stays open, and the graph does not open automatically.

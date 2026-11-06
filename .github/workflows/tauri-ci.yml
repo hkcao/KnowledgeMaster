@@ -5,6 +5,12 @@ on:
     branches: [main, tauri-codex]
     tags: ["v*"]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing version tag to rebuild and publish
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -18,13 +24,20 @@ jobs:
         include:
           - name: macOS
             os: macos-15
-            bundle: dmg
+            bundle: app,dmg
           - name: Windows
             os: windows-2022
             bundle: nsis
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
+      - name: Verify requested release version
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: node -e 'if (process.env.RELEASE_TAG !== "v" + require("./package.json").version) process.exit(1)'
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -40,7 +53,7 @@ jobs:
       - name: Test library migrations and PDF refresh in release mode
         run: cargo test --locked --release --manifest-path src-tauri/Cargo.toml --lib
       - name: Verify Windows CPU OCR installation and inference
-        if: runner.os == 'Windows' && startsWith(github.ref, 'refs/tags/v')
+        if: runner.os == 'Windows' && (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch')
         timeout-minutes: 20
         run: cargo test --locked --release --manifest-path src-tauri/Cargo.toml --lib real_cpu_ocr_smoke -- --ignored --nocapture
       - name: Prepare portable Windows executable
@@ -95,7 +108,7 @@ jobs:
 
   release:
     name: Publish release packages
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs: test-and-build
     runs-on: ubuntu-latest
     permissions:
@@ -109,6 +122,14 @@ jobs:
       - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
-          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes --title "$GITHUB_REF_NAME"
-          find release-artifacts -type f -print0 | xargs -0 gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber
+          python3 - <<'PY'
+          import hashlib
+          from pathlib import Path
+          root = Path('release-artifacts')
+          files = sorted(path for path in root.rglob('*') if path.is_file())
+          (root / 'SHA256SUMS.txt').write_text(''.join(f'{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n' for path in files), encoding='utf-8')
+          PY
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --generate-notes --title "$RELEASE_TAG"
+          find release-artifacts -type f -print0 | xargs -0 gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --clobber
