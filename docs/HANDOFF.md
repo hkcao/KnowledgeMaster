@@ -77,7 +77,7 @@
 - **日志限制与现存注记**：尝试读取详细 run log 时，gh CLI 因写入受限的 `~/.cache/gh/run-log-...zip` 失败；没有继续要求家目录缓存写权限，使用可读的 CI 作业/步骤 success 元数据及公开附件核验结果作为发布证据，未取得 Windows OCR 精确耗时。Actions 有既有 Node 20 退役/强制使用 Node 24、macOS runner 容量和 ubuntu-latest 迁移提示，未影响构建发布。
 - **当前状态与下一步**：功能、版本和 CI 已提交/推送并正式发布；本文档的发布证据随 docs-only 后续提交推送（使用 `[skip ci]` 避免重复构建）。后续是用户 Windows 11 桌面验收：资料库刷新、好坏文件混合处理、设置一键下载、ModelScope 源、取消重试和离线 OCR。CI 为 Windows Server 2022 runner，不等于用户桌面交互验收；无需再次发布相同二进制。
 
-### 0.6 全文中文翻译、双语阅读与 Agent 默认上下文（2026-11-06，本地未提交）
+### 0.6 全文中文翻译、双语阅读与 Agent 默认上下文（2026-11-06，实现历史，现已提交见 0.10）
 
 - **需求与状态**：实现用户新增的三项需求：导入时选择全文翻译为中文；段落中英交替/左右同步对照；Agent 默认勾选当前阅读文档；应用图标美化。版本仍为 `0.2.8`，分支 `tauri-codex`，HEAD `e39c1051cdbdfb5769b4965c053c565d733823d9`。本轮开始时工作区干净；所有本轮修改和新增文件均未暂存、未提交、未推送。本轮没有创建标签、安装包或发布，0.5 节为上次发布证据，未在本轮重查远端 CI/Release。
 - **入口与流程**：`App.tsx` 将文件选择、目录和拖放统一交给 `ImportDialog.tsx`，翻译复选框默认关闭；网页导入在 `LibrarySidebar.tsx` 中也有选项。旧文档可通过 `Reader.tsx` 的“翻译全文”补译。翻译复用设置中的直接 API（独立于当前问答 backend），不启动 CLI Agent、不读取用户 Key 做验证；只在真实翻译请求时按现有凭据流程取 Key。Agent 下载待确认流程仍原样保留，可在导入后阅读器补译。
@@ -90,7 +90,7 @@
 - **真实浏览器验证**：临时 React 页面配合模拟 IPC/API，用系统 Chrome 检查两种模式、合成 PDF 和图形、当前文档标签，无页面错误；HTML 两侧滚动值 900/1431 时均定位到 `block-7`。另外验证内嵌 CSS 保留颜色/居中/内联右对齐，且不修改应用 body。截图 `/tmp/knowledgemaster-bilingual-html.png`、`/tmp/knowledgemaster-bilingual-interleaved.png`、`/tmp/knowledgemaster-bilingual-pdf.png`，图标预览 `/tmp/knowledgemaster-icons/icon.png`。默认沙箱不能启动 Chrome，使用已获自动批准的临时无头浏览器运行；临时源码/合成 PDF 和 Vite 服务已清理。截图是模拟 API 结果，不是模型翻译质量或 Windows 真机验收。
 - **后续单一动作**：在测试资料库中用用户已配置的 API 实测一篇真实英文论文，核对全文、图片、复杂版式和翻译质量，再决定是否打包发布。尚无真实 API、macOS WebKit 或 Windows 桌面的端到端翻译验收；本轮不接触用户私有资料库。发布需按用户下一次授权同步新版本/标签，不能声称现有 v0.2.8 安装包已包含本轮功能。
 
-### 0.7 笔记搜索、知识关联图谱与天蓝主题（2026-11-06，本地未提交）
+### 0.7 笔记搜索、知识关联图谱与天蓝主题（2026-11-06，实现历史，现已提交见 0.10）
 
 - **最新需求与状态**：用户要求美化笔记/注释、支持直接搜索、类似 llm-wiki 的关系展示、手动或模型关联、选中项突出所有关联，以及把绿色主题改为类似 DeepSeek 的天蓝色。本节覆盖 0.6 节之后的新改动；保留全文翻译、默认 Agent 上下文等上一轮所有未提交修改。分支仍为 `tauri-codex`，HEAD 仍 `e39c1051`，版本仍 `0.2.8`；所有本轮变更及本文档均未暂存、未提交、未推送，没有新增标签、安装包或发布，没有在用户真实资料库运行迁移。
 - **卡片与搜索**：`NotesPanel.tsx` / `NoteCard.tsx` 用统一卡片展示独立笔记和阅读注释，显示类型、正文/摘录、来源、页码、日期和直接关联数；可筛选全部/笔记/注释。搜索在已加载资料中实时匹配标题、正文、注释文本、原文摘录及来源文档名，英文忽略大小写，多关键词同时匹配。总结编辑器仍保存 Markdown 与引用注释，并增加注释搜索和保存失败提示；不引入向量数据库。
@@ -120,12 +120,14 @@
 - **交付**：新包 [KnowledgeMaster-preview-20261106-r2-macOS-arm64.zip](../release/KnowledgeMaster-preview-20261106-r2-macOS-arm64.zip)，9,465,982 bytes，SHA-256 `3d3ffdbfd3173922bcd69ff49e76b2641ac1c16c0b8467effe3930b1192262ab`。保留 0.8 节旧 ZIP，避免混淆。新包已 ad-hoc 签名并验证，ZIP 完整性、解压后签名和主程序哈希一致性通过；已确认主程序不同于 r1。适用 Apple Silicon/macOS 14+，使用前退出旧测试版。试用说明强调此轮不新增迁移，首次从旧正式版试用仍需遵守 0.8 节的资料库备份建议。
 - **Git 与下一步**：版本仍 `0.2.8`，分支/HEAD 不变，0.6–0.9 所有源码及交接修改均未暂存、未提交、未推送；ZIP 和 staging app 在忽略的 `release/` 下。请用户用 r2 验证普通阅读和显式图谱入口，后续按反馈迭代；没有公开发布。
 
-### 0.10 GitHub 提交推送（2026-11-06，进行中）
+### 0.10 GitHub 提交推送（2026-11-06，功能已推送）
 
 - 用户已明确要求“提交 github”，授权把 0.6–0.9 节的功能、测试、图标和文档提交并推送到现有 `tauri-codex`；不包含发布标签、Release 或上传本地 ZIP。本次无需另开 PR，沿用当前分支交付。
 - 提交前核对本地 HEAD 与远端 `refs/heads/tauri-codex` 均为 `e39c1051cdbdfb5769b4965c053c565d733823d9`。52 个变更/新增文件均属于会话需求；凭据特征扫描未发现疑似私钥或访问令牌。`release/`、`dist/`、依赖和 `src-tauri/target/` 不入 Git。
 - 功能验证沿用 0.9 节前端 39/39、生产构建和 macOS r2 包校验，以及 0.7 节 Rust 52 passed / 1 ignored；代码在这些验证之后未改变，未重复运行无关测试。
-- 此刻为提交前记录，改动尚在工作区；后续提交号、推送与 CI 状态在操作成功后补充。分支 push 按既有工作流触发 macOS/Windows CI，不创建 `v*` 标签，因此不触发公开 Release 发布。
+- 功能提交 `4e2409b711e57cf95ee1ffd6241d88063b9a2d2d`（`feat: add bilingual reading and linked notes workspace`）已成功推送，`git ls-remote` 验证远端分支一致。0.6–0.9 节的“未提交”是各轮当时状态，现均包含在该提交中。版本仍为 `0.2.8`，没有创建标签或修改公开 Release。
+- CI 已启动：[Tauri desktop / 42175684019](https://github.com/hkcao/KnowledgeMaster/actions/runs/42175684019)，对应上述功能提交，查询时为 `in_progress`，尚不能声称 Windows/macOS CI 已通过。
+- 本节为功能推送后的 docs-only 交接补记，随紧接的文档提交交付，并使用 `[skip ci]` 避免重复构建；最新分支 tip 以 `git log` / `git ls-remote` 核对。用户本地 r2 包不变，公开 Release 仍沿用 0.5 节历史核验，本轮没有发布安装包。
 
 ## 1. 项目定位与不可破坏的约束
 
@@ -152,7 +154,7 @@
 - 本地目录：`/Users/hank/Desktop/知识整理器`
 - GitHub：`https://github.com/hkcao/KnowledgeMaster`
 - 仓库：Public，MIT License
-- 当前分支：`tauri-codex`；功能/版本提交与 `v0.2.8^{}` 均为 `fb59f5583ed0e24655c0ec94b3ffed10f8eed4c8`，远端分支随后包含本文档的 docs-only 发布证据提交，最新 tip 以 `git log` / `git ls-remote` 核对。
+- 当前分支：`tauri-codex`；最新功能提交 `4e2409b711e57cf95ee1ffd6241d88063b9a2d2d` 已推送，随后有 docs-only 交接补记，见 0.10 节。公开 `v0.2.8^{}` 的历史发布提交仍为 `fb59f558`，不包含本轮新功能；最新分支 tip 以 `git log` / `git ls-remote` 核对。
 - 当前线上发布提交：`fb59f558`（`release: add resilient PDF refresh and CPU OCR for v0.2.8`）。
 - 当前公开正式版本/标签：`v0.2.8`，包含刷新容错与 CPU OCR；公开附件和核验见 0.5 节。
 - 2026-10-26 再次核验：`refs/tags/v0.2.6^{}` 仍指向 `c0a52f5f`，分支 tip 为后续 docs-only 提交 `566cdff1`，并非发布二进制的提交。
@@ -377,7 +379,7 @@ GitHub Actions 文件：`.github/workflows/tauri-ci.yml`
 
 ## 11. 当前工作树和本轮变更
 
-2026-11-06 当前存在 0.6 / 0.7 / 0.9 节所列的未暂存修改与未跟踪源码/测试，本地 r1/r2 包位于忽略的 release/；本文档最新修改也仅在工作区。没有执行 Git 提交或发布。
+2026-11-06 功能、测试、图标和 README 已提交为 `4e2409b7` 并推送，源码没有遗留的暂存、未暂存或未跟踪修改。本文档为后续交接补记，随紧接的 docs-only 提交交付；本地 r1/r2 包位于忽略的 `release/`，没有创建标签或发布安装包。当前分支 tip 与 CI 证据见 0.10 节。
 
 以下为 2026-10-27 发布后的历史状态：功能、版本、README、测试和 CI 共 22 个文件已提交为 `fb59f558` 并推送/发布 v0.2.8；其中包含此前未跟踪的 `ocr.rs`、`ocr_worker.py`、`App.test.tsx`、`SettingsModal.test.tsx`。提交前工作区既有的 `docs/HANDOFF.md` 进度也已保留。本次最终发布证据仅修改本文档，随 docs-only 后续提交推送；不重新移动发布标签。当时提交后工作区干净；这不适用于 0.6 节的本地新功能。
 
@@ -410,4 +412,4 @@ GitHub Actions 文件：`.github/workflows/tauri-ci.yml`
 
 可以把下面内容作为新窗口的第一条消息：
 
-> 请先阅读 `/Users/hank/Desktop/知识整理器/docs/HANDOFF.md`，尤其是 0.6 / 0.7 / 0.9 节未提交的翻译、笔记图谱、Agent 默认上下文和天蓝主题；注意普通卡片只展开单项，图谱只能通过专用按钮打开，最新试用包为 r2；先保留这些改动，在测试资料库副本中验证真实笔记与论文。遵循当前窗口提供的 `AGENTS.md` 指令。核对 `git status`、当前分支、远端 HEAD、GitHub Actions 和 Release 后继续工作；任何提交、推送或发布动作按我当前请求的范围执行。
+> 请先阅读 `/Users/hank/Desktop/知识整理器/docs/HANDOFF.md`，尤其是 0.10 节的 Git/CI 状态及 0.6 / 0.7 / 0.9 节的已提交功能。注意普通卡片只展开单项，图谱只能通过专用按钮打开，最新本地试用包为 r2；在测试资料库副本中验证真实笔记与论文。遵循当前窗口提供的 `AGENTS.md` 指令。核对 `git status`、当前分支、远端 HEAD、GitHub Actions 和 Release 后继续工作；任何提交、推送或发布动作按我当前请求的范围执行。
