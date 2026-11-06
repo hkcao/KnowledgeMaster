@@ -128,6 +128,9 @@ jobs:
           import hashlib
           from pathlib import Path
           root = Path('release-artifacts')
+          for path in root.rglob('*'):
+              if path.is_file() and path.name.startswith('知屿 '):
+                  path.rename(path.with_name(path.name.removeprefix('知屿 ')))
           files = sorted(path for path in root.rglob('*') if path.is_file())
           (root / 'SHA256SUMS.txt').write_text(''.join(f'{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n' for path in files), encoding='utf-8')
           PY
