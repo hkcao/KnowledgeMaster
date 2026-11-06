@@ -6,7 +6,7 @@
 
 知屿把“收集论文 → 精读与批注 → 研究笔记 → 跨文档问答 → 沉淀理解”放在一个桌面应用中。资料和元数据默认留在用户自己的磁盘；AI 只在用户发起请求时访问明确授权的范围。
 
-> 本页展示 `main` 分支源码。全文翻译、笔记图谱和天蓝主题已进入源码；当前公开的 `v0.2.8` 安装包尚不包含这些新增功能，下载时请以对应 Release 说明为准。
+> v0.3.0 包含全文翻译、笔记图谱和天蓝主题。macOS Apple Silicon 提供解压即用 ZIP，Windows x64 提供免安装 EXE / ZIP；请从 [Releases](https://github.com/hkcao/KnowledgeMaster/releases) 选择对应平台。
 
 ## 界面示意
 
@@ -63,7 +63,7 @@
 - 知识图谱支持笔记与笔记、笔记与注释、注释与注释之间的手动关联，兼容已有注释引用。选中节点可高亮全部关联链或直接关联，支持搜索筛选、缩放与平移。
 - 可使用已配置的 API 建议关联并给出理由，确认后保存；候选较多时分析最相关的 40 项，并显示本次分析范围。
 - 支持导出原文和带批注版本。
-- 导入文件、目录、拖放或网页时可选择全文翻译为中文，使用设置中的 API；已有文档可点击“翻译全文”。原件保留，译文另存为可搜索的中文 HTML 文档，图片共用资料库的资源目录。
+- 导入文件、目录、拖放或网页时可选择全文翻译为中文，在设置中独立选择翻译方式（默认直接 API，也可选已检测到并登录的 Claude Code / Codex）；已有文档可点击“翻译全文”。原件保留，译文另存为可搜索的中文 HTML 文档，图片共用资料库的资源目录。中英文正文同时参与检索，结果统一定位原文；左侧目录只显示原文，不重复列出译文。删除原文后保留的译文仍可独立显示。
 - 双语阅读支持“段落中英交替”和“左右同步对照”，按对应段落同步滚动。文字 PDF 保留页面图形和文字位置；扫描页保留扫描图并在下方显示 OCR 译文；DOCX 保留段落、表格和嵌入图片，复杂 Word 分页/浮动排版不保证完全一致，DOC 请先转为 DOCX/PDF。代码和公式保留原样。
 
 ### AI 与本地 Agent
@@ -95,7 +95,7 @@
 | WebView | 系统 WebKit | WebView2 |
 | 凭据 | Keychain | Credential Manager |
 | Agent 终止 | 终止进程 | `taskkill /T` 终止进程树 |
-| 发布包 | `.dmg` | 便携版 `.exe` / NSIS 安装版 `.exe` |
+| 发布包 | 免安装 `.zip` / `.dmg` | 免安装 `.exe` / `.zip` / NSIS 安装版 `.exe` |
 
 共享技术栈：
 
@@ -116,13 +116,13 @@
 3. 便携版依赖系统 WebView2。较新的 Windows 10/11 通常已经自带；如果程序无法打开，请先安装 Microsoft Edge WebView2 Runtime。安装版会在缺失时联网补充安装。
 4. 未签名版本可能触发 Windows SmartScreen；请先确认文件来自本仓库的 Release，再选择“更多信息 → 仍要运行”。
 5. 第一次启动后，在“设置”中选择资料库目录。需要多设备同步时，可以选择 OneDrive 内的目录，但不要让两台设备同时修改同一个资料库。
-6. 只有使用 AI 时才需要在设置中填写 DeepSeek、智谱 GLM 或自定义 OpenAI 兼容接口的 API Key。Key 按需读取，并保存在 Windows Credential Manager。
+6. 直接 API 功能需要在设置中填写模型连接和 API Key，Key 按需读取并保存在 Windows Credential Manager。使用已登录的 Claude Code / Codex 翻译或聊天时不需要应用 API Key。
 
 如果 Release 中暂时没有 Windows 安装程序，可以按下方“Windows 编译”从源码生成。
 
 ### macOS
 
-从 [GitHub Releases](https://github.com/hkcao/KnowledgeMaster/releases) 下载 `.dmg`，打开后把知屿拖入“应用程序”并启动。未经过 Apple 公证的版本首次打开时，需要在“系统设置 → 隐私与安全性”中确认允许打开。
+从 [GitHub Releases](https://github.com/hkcao/KnowledgeMaster/releases) 下载 `KnowledgeMaster-0.3.0-macOS-arm64-portable.zip`，解压后直接打开应用。也可下载 `.dmg`，打开后把知屿拖入“应用程序”并启动。未经过 Apple 公证的版本首次打开时，需要在“系统设置 → 隐私与安全性”中确认允许打开。
 
 ### 本地 CPU OCR（v0.2.8 起）
 

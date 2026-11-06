@@ -106,7 +106,14 @@ function closeOtherFolderMenus(current: HTMLDetailsElement) {
 }
 
 export default function LibrarySidebar(props: Props) {
-  const { data, rootPath, currentDocumentId, onData, onReload, onOpenDocument, onOpenAnnotation } = props;
+  const { rootPath, currentDocumentId, onData, onReload, onOpenDocument, onOpenAnnotation } = props;
+  const data = useMemo(() => {
+    const sources = props.data.translationSources ?? {};
+    return { ...props.data, documents: props.data.documents.filter((document) => {
+      const sourceId = sources[document.id];
+      return !sourceId || !props.data.documents.some((source) => source.id === sourceId);
+    }) };
+  }, [props.data]);
   const [mode, setMode] = useState<Mode>("directory");
   const [query, setQuery] = useState("");
   const [matches, setMatches] = useState<Set<UUID> | null>(null);
@@ -391,7 +398,7 @@ export default function LibrarySidebar(props: Props) {
       </div>
 
       {mode === "notes" ? (
-        <NotesPanel data={data} onData={onData} onOpenAnnotation={onOpenAnnotation} />
+        <NotesPanel data={props.data} onData={onData} onOpenAnnotation={onOpenAnnotation} />
       ) : (
         <div className="library-body">
           <label className="search-field">
@@ -506,7 +513,7 @@ export default function LibrarySidebar(props: Props) {
             <h2>导入网页</h2>
             <p className="muted">普通网页将以 HTML 原文保存；链接实际返回 PDF 时会直接下载为 PDF。两种格式均可阅读、检索并用于 AI 问答。</p>
             <input autoFocus disabled={Boolean(webImportProgress)} value={webURL} onChange={(event) => setWebURL(event.target.value)} placeholder="https://example.com/article" />
-            <label><input type="checkbox" checked={translateWeb} disabled={Boolean(webImportProgress)} onChange={(event) => setTranslateWeb(event.target.checked)} />导入后全文翻译为中文（使用已配置的 API）</label>
+            <label><input type="checkbox" checked={translateWeb} disabled={Boolean(webImportProgress)} onChange={(event) => setTranslateWeb(event.target.checked)} />导入后全文翻译为中文（使用设置中的翻译方式）</label>
             {webImportProgress && (
               <div className="web-import-progress" role="status" aria-live="polite">
                 <div className="web-import-progress-head">

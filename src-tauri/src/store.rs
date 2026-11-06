@@ -185,6 +185,7 @@ pub fn prepare_directories(root: &Path) -> Result<(), String> {
 
 pub fn load_data(root: &Path) -> Result<KnowledgeData, String> {
     let mut data = crate::database::load_or_migrate(root)?;
+    data.translation_sources = crate::translation::sources(root, &data);
     data.version = 8;
     for conversation in &mut data.conversations {
         conversation.summary_message_count = conversation
@@ -876,6 +877,10 @@ pub fn delete_document(inner: &mut Inner, id: Uuid) -> Result<(), String> {
     inner.data.documents.retain(|document| document.id != id);
     inner
         .data
+        .translation_sources
+        .retain(|target, source| *target != id && *source != id);
+    inner
+        .data
         .document_topics
         .retain(|item| item.document_id != id);
     inner.data.bookmarks.retain(|item| item.document_id != id);
@@ -1013,6 +1018,7 @@ pub fn unlink_document(inner: &mut Inner, document_id: Uuid, topic_id: Uuid) -> 
 
 pub fn search_documents(inner: &Inner, query: &str) -> Vec<Uuid> {
     let terms = query_terms(query);
+    let mut seen = HashSet::new();
     inner
         .data
         .documents
@@ -1030,7 +1036,15 @@ pub fn search_documents(inner: &Inner, query: &str) -> Vec<Uuid> {
                 .iter()
                 .any(|term| metadata.contains(term) || extracted.contains(term))
         })
-        .map(|document| document.id)
+        .map(|document| {
+            inner
+                .data
+                .translation_sources
+                .get(&document.id)
+                .copied()
+                .unwrap_or(document.id)
+        })
+        .filter(|id| seen.insert(*id))
         .collect()
 }
 
@@ -2064,6 +2078,7 @@ mod tests {
     fn ocr_is_enabled_for_legacy_settings_but_good_native_pdf_bypasses_it() {
         let settings: AppSettings = serde_json::from_str("{}").unwrap();
         assert!(settings.local_ocr_enabled);
+        assert_eq!(settings.translation_backend, "direct");
         let extracted = ExtractedDocument {
             text: "already searchable native PDF text".into(),
             pages: vec![ExtractedPage {

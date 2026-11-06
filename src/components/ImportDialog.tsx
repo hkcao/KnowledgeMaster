@@ -48,7 +48,7 @@ export default function ImportDialog({ paths, onData, onComplete }: {
     {!completed && <>
       <p>{paths.length} 个文件或目录</p>
       <label><input type="checkbox" checked={translate} disabled={busy} onChange={(event) => setTranslate(event.target.checked)} />导入后全文翻译为中文</label>
-      <p className="muted">使用设置中的 API，保留原文和图片，另存中文文档。阅读时可切换段落交替或左右同步。文字 PDF 保留页面位置；扫描页保留图片并在下方显示 OCR 译文。DOC 请先转为 DOCX。</p>
+      <p className="muted">使用设置中的翻译方式，保留原文和图片，另存中文文档。阅读时可切换段落交替或左右同步。文字 PDF 保留页面位置；扫描页保留图片并在下方显示 OCR 译文。DOC 请先转为 DOCX。</p>
     </>}
     {detail && <p role="status">{detail}</p>}
     {!!messages.length && <div className="import-results" role="status">{messages.map((message, i) => <p key={i}>{message}</p>)}</div>}

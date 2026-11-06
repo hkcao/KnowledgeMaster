@@ -9,7 +9,7 @@ vi.mock("../translation", () => ({ translateDocument: vi.fn() }));
 const empty: KnowledgeData = { version: 8, documents: [], topics: [], documentTopics: [], bookmarks: [], annotations: [], conversations: [], topicSummaries: [], summaryNotes: [] };
 const docs = ["one", "two"].map((id) => ({ id, name: `${id}.txt`, extension: ".txt", size: 1, authors: [], sha256: id, importedAt: "", status: "ready" }));
 const imported = { ...empty, documents: docs };
-const initial: BootstrapState = { data: empty, rootPath: "/test/source", warnings: [], agentAvailability: { codex: null, claudeCode: null }, settings: { provider: "custom", baseURL: "", model: "", chatBackend: "direct", chatPlacement: "right", libraryVisible: true, apiContextMode: "relevantFragments", visionEnabled: false, localOcrEnabled: true } };
+const initial: BootstrapState = { data: empty, rootPath: "/test/source", warnings: [], agentAvailability: { codex: null, claudeCode: null }, settings: { provider: "custom", baseURL: "", model: "", translationBackend: "direct", chatBackend: "direct", chatPlacement: "right", libraryVisible: true, apiContextMode: "relevantFragments", visionEnabled: false, localOcrEnabled: true } };
 beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(api.bootstrap).mockResolvedValueOnce(initial).mockResolvedValueOnce({ ...initial, data: imported });

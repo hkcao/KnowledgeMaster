@@ -10,7 +10,7 @@ const ready: OcrStatus = { ...missing, ready: true, detail: "本地 CPU OCR 已�
 const state: BootstrapState = {
   rootPath: "/test/source", warnings: [], agentAvailability: { claudeCode: null, codex: null },
   data: { version: 8, documents: [], topics: [], documentTopics: [], bookmarks: [], annotations: [], conversations: [], topicSummaries: [], summaryNotes: [] },
-  settings: { provider: "custom", baseURL: "", model: "", chatBackend: "direct", chatPlacement: "right", libraryVisible: true, apiContextMode: "relevantFragments", visionEnabled: false, localOcrEnabled: true }
+  settings: { provider: "custom", baseURL: "", model: "", translationBackend: "direct", chatBackend: "direct", chatPlacement: "right", libraryVisible: true, apiContextMode: "relevantFragments", visionEnabled: false, localOcrEnabled: true }
 };
 
 beforeEach(() => {
@@ -18,6 +18,18 @@ beforeEach(() => {
   vi.mocked(api.ocrStatus).mockResolvedValue(missing);
 });
 afterEach(cleanup);
+
+it("keeps translation independent from chat and allows only detected agents", async () => {
+  const onState = vi.fn();
+  render(<SettingsModal state={{ ...state, settings: { ...state.settings, chatBackend: "claudeCode" }, agentAvailability: { claudeCode: null, codex: "/test/codex" } }} onState={onState} onClose={vi.fn()} />);
+  const select = screen.getByRole("combobox", { name: "翻译方式" });
+  expect(select).toHaveValue("direct");
+  expect(select.querySelector('option[value="claudeCode"]')).toBeDisabled();
+  expect(select.querySelector('option[value="codex"]')).toBeEnabled();
+  fireEvent.change(select, { target: { value: "codex" } });
+  expect(api.updateSettings).toHaveBeenCalledWith(expect.objectContaining({ translationBackend: "codex", chatBackend: "claudeCode" }));
+  await screen.findByText("尚未下载；普通文字 PDF 仍可直接导入。");
+});
 
 it("downloads on demand with the selected source and shows readiness", async () => {
   vi.mocked(api.setupOcr).mockResolvedValue(ready);

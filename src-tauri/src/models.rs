@@ -356,6 +356,9 @@ pub struct KnowledgeData {
     pub summary_notes: Vec<SummaryNote>,
     #[serde(default)]
     pub note_links: Vec<NoteLink>,
+    /// Derived from translation caches; SQLite remains the source for document metadata.
+    #[serde(default)]
+    pub translation_sources: HashMap<Uuid, Uuid>,
 }
 
 impl Default for KnowledgeData {
@@ -371,6 +374,7 @@ impl Default for KnowledgeData {
             topic_summaries: vec![],
             summary_notes: vec![],
             note_links: vec![],
+            translation_sources: HashMap::new(),
         }
     }
 }
@@ -390,6 +394,8 @@ pub struct AppSettings {
     pub model: String,
     #[serde(default = "direct")]
     pub chat_backend: String,
+    #[serde(default = "direct")]
+    pub translation_backend: String,
     #[serde(default = "right")]
     pub chat_placement: String,
     #[serde(default = "default_true")]
@@ -409,6 +415,7 @@ impl Default for AppSettings {
             base_url: base_url(),
             model: model(),
             chat_backend: direct(),
+            translation_backend: direct(),
             chat_placement: right(),
             library_visible: true,
             api_context_mode: fragments(),

@@ -144,6 +144,7 @@ export interface KnowledgeData {
   topicSummaries: Array<{ topicId: UUID; summary: string; updatedAt: string }>;
   summaryNotes: SummaryNote[];
   noteLinks?: NoteLink[];
+  translationSources?: Record<UUID, UUID>;
 }
 
 export interface NoteLink {
@@ -163,6 +164,7 @@ export interface AppSettings {
   baseURL: string;
   model: string;
   chatBackend: ChatBackend;
+  translationBackend: ChatBackend;
   chatPlacement: ChatPlacement;
   libraryVisible: boolean;
   apiContextMode: APIContextMode;

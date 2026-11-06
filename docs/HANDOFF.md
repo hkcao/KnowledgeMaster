@@ -6,6 +6,17 @@
 
 本项目使用个人 `project-handoff` Skill（`/Users/hank/.codex/skills/project-handoff`）持续维护本文档。发生重要决策、实现、验证、发布或工作区状态变化时更新同一文件，不创建按日期重复的交接文档。
 
+## 当前进度：v0.3.0 翻译后端、双语搜索与免安装发布（2026-11-06）
+
+- **授权与分支**：用户要求翻译方式支持 API / 可用 Agent、中英文检索合并到原文、提交 GitHub 并发布新版 macOS / Windows 免安装版。继续在 `main`，开始时工作区干净、HEAD / origin/main 均为 `efa95a013c57e39306b7ccf0a3b57c0000300426`。版本文件已统一为 **0.3.0**；尚未创建标签或推送本轮改动，下面历史节的旧状态不代表本轮状态。
+- **翻译执行**：设置新增 `translationBackend`，旧配置缺字段默认为 `direct`，与 `chatBackend` 独立。可选检测到的 Claude Code / Codex，复用 `agent.rs::run_agent()`，每批使用独立临时工作区与全新会话，只传文本 JSON，不选择资料库文件/批注；无需应用 API Key。复用相同的完整性校验与保存流程。API / Agent 每批 180 秒超时；Agent 进程 drop 时终止，翻译包装器移除进程登记并清理临时工作区。失败明确提示、不自动换后端；取消沿用结束当前批次后停止、不保存半篇译文。
+- **检索与目录**：`KnowledgeData.translationSources` 是译文 ID → 原文 ID 的派生映射；`store::load_data()` 从既有 `source/index/translations/<source-id>.json` 读取并验证源 ID、SHA 与目标存在性，兼容已有译文，无须升级 SQLite schema（仍为 2）或 data version（仍为 8）。`translation::save()` 即时补映射，删除文档清理映射。`search_documents()` 检索原文与中文独立索引后映射回原文并去重；`LibrarySidebar` 仅目录数据过滤关联译文，笔记页仍获得完整数据，阅读器仍可打开中文文档。删除原文后保留译文恢复独立显示/检索。
+- **验证**：`npm test` **8 文件 / 41 passed**；`npm run build` 成功，主 JS 1,407.24 kB / gzip 426.70 kB，原有 chunk / PDF.js 导入提示保留。`cargo test --locked --manifest-path src-tauri/Cargo.toml --offline` **52 passed / 1 ignored**，新增断言覆盖默认后端、可用 Agent 选择、聊天设置独立、双语命中去重、重启恢复既有译文映射、删除与重建。Clippy 完成，仅原有 5 条 warning；workflow YAML 解析、diff 检查通过。未连接真实翻译服务或 CLI 登录验证翻译质量，未做 Windows UI 真机验收。
+- **本地包**：`npm run tauri build -- --bundles app` 成功；`release/KnowledgeMaster-0.3.0-macOS-arm64-portable.zip` **9,470,360 bytes**，SHA-256 `fc4c4bbe246ed7c07b7c9e54f406bd346234e5f5b15939cf9d005172730074fb`。ad-hoc 重签名，解压后 strict 验签、Info.plist 0.3.0、主程序字节一致通过；未公证，未打开用户资料库。
+- **发布流水线**：保留 DMG / Windows NSIS / 单独 portable EXE，新增 macOS app ZIP 与 Windows ZIP（含平台说明）；CI 校验 Mac 解压后签名、Windows 解压后 exe SHA-256 一致。README 双语更新翻译方式、检索行为及下载方式，现有示意图保留。`docs/PORTABLE.txt` 说明现有资料路径、schema 1→2 备份、WebView2 和未签名限制。
+- **历史 CI 更正**：`42177817863` 已完成，Windows success / macOS cancelled，整次 conclusion cancelled；未作为本次发布通过证据。
+- **工作区 / 下一步**：本轮代码、版本、README、CI、本文为未暂存修改；包在 ignored `release/`，不进 Git。生产模式 Rust 库测试同样 52 passed / 1 ignored。diff 已审查，待提交并推送 `main` 与新 `v0.3.0` 标签，等待两平台 tag CI / Windows OCR smoke / 公开 Release，核验线上资产后更新本节。不得把本地包当作公开 Release。
+
 ## 0. 首轮 Windows PDF 刷新闪退修复（2026-10-26）
 
 本节及 0.1 节保留首轮修复时的历史记录；上次发布见 0.5 节，当前功能和入口纠正见 0.6 / 0.7 / 0.9 节，本地试用包以 0.9 节 r2 为准，0.8 节保留首包记录。历史“失败即返回”行为已由 0.3 节替代。

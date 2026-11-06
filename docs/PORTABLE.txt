@@ -1,0 +1,16 @@
+知屿 KnowledgeMaster 免安装版
+
+macOS Apple Silicon（arm64）：解压后打开“知屿 KnowledgeMaster.app”，macOS 14 或更新版本。
+Windows x64：解压后打开 KnowledgeMaster.exe；也可以直接运行单独下载的 KnowledgeMaster-portable.exe。Windows 10/11 需要 Microsoft Edge WebView2 Runtime。
+
+先退出旧版本，再打开新版本。免安装仅指应用程序，无需安装器；资料库与设置仍使用本机已有位置。首次启动可在设置中选择资料库目录。
+从 v0.2.8 或更旧版本升级前，请备份整个资料库目录。v0.3.0 会将 SQLite schema 1 自动升级为 2，旧版应用无法打开升级后的资料库；回退时请使用备份。
+
+设置 → 文档翻译：默认使用 API，也可以选择本机已检测到并完成登录的 Claude Code / Codex。聊天与翻译方式独立。
+中文译文仍单独保存在资料库中；目录仅展示原文。中英文正文都可以搜索，结果合并到原文；阅读器可切换段落交替、左右同步或打开中文文档。
+OCR 模型按需下载，未包含在应用包中。
+
+此版本未经过 Apple 公证或 Windows 代码签名。请只从官方仓库 Release 下载。
+macOS 如提示拦截，可在“系统设置 → 隐私与安全性”中允许打开；Windows 如提示 SmartScreen，可核对来源后选择“更多信息 → 仍要运行”。
+
+下载与更新：https://github.com/hkcao/KnowledgeMaster/releases

@@ -124,6 +124,16 @@ export default function SettingsModal({
           </fieldset>
 
           <fieldset>
+            <legend>文档翻译</legend>
+            <label className="form-row"><span>翻译方式</span><select value={settings.translationBackend ?? "direct"} onChange={(event) => persist({ ...settings, translationBackend: event.target.value as ChatBackend })}>
+              <option value="direct">直接 API（默认）</option>
+              <option value="claudeCode" disabled={!state.agentAvailability.claudeCode}>Claude Code{state.agentAvailability.claudeCode ? "" : "（未检测到）"}</option>
+              <option value="codex" disabled={!state.agentAvailability.codex}>Codex{state.agentAvailability.codex ? "" : "（未检测到）"}</option>
+            </select></label>
+            <p className="muted">独立于聊天设置。API 使用下方模型连接；Agent 使用本机已安装并登录的 CLI，逐批翻译正文，无需配置 API Key。未检测到的 Agent 不可选择；执行失败会保留原文并提示原因。</p>
+          </fieldset>
+
+          <fieldset>
             <legend>模型连接</legend>
             <label className="form-row"><span>服务商</span><select value={settings.provider} onChange={(event) => persist(providerDefaults(event.target.value as AppSettings["provider"]))}>
               <option value="deepseek">DeepSeek</option><option value="glm">智谱 GLM</option><option value="custom">其他 OpenAI 兼容服务</option>

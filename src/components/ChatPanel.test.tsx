@@ -9,7 +9,7 @@ afterEach(() => { cleanup(); vi.resetAllMocks(); });
 const current: KnowledgeDocument = { id: "current", name: "Current.pdf", extension: ".pdf", size: 1, authors: [], sha256: "hash", importedAt: "", status: "ready" };
 const other = { ...current, id: "other", name: "Other.pdf" };
 const data: KnowledgeData = { version: 8, documents: [current, other], topics: [], documentTopics: [], bookmarks: [], annotations: [], conversations: [], topicSummaries: [], summaryNotes: [] };
-const settings: AppSettings = { provider: "custom", baseURL: "", model: "", chatBackend: "codex", chatPlacement: "right", libraryVisible: true, apiContextMode: "relevantFragments", visionEnabled: false, localOcrEnabled: false };
+const settings: AppSettings = { provider: "custom", baseURL: "", model: "", translationBackend: "direct", chatBackend: "codex", chatPlacement: "right", libraryVisible: true, apiContextMode: "relevantFragments", visionEnabled: false, localOcrEnabled: false };
 const props = { data, settings, agentAvailability: { codex: "/bin/codex", claudeCode: null }, onQuote: vi.fn(), onData: vi.fn(), onSettings: vi.fn() };
 
 it("defaults to the displayed document, follows tab changes, and allows deselection before agent launch", async () => {

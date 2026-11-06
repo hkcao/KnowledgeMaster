@@ -303,6 +303,7 @@ pub async fn run_agent(
     let mut command = agent_command(&executable);
     command
         .args(args)
+        .kill_on_drop(true)
         .current_dir(&workspace)
         .env_clear()
         .envs(sanitized_environment())
@@ -458,6 +459,55 @@ pub async fn run_agent(
         trace_events: trace,
         session_id: parsed_session.or(effective_session),
     })
+}
+
+pub async fn complete_translation(
+    app: &AppHandle,
+    state: &AppState,
+    backend: &str,
+    prompt: &str,
+) -> Result<String, String> {
+    let inner = {
+        let current = state.inner.lock().map_err(error)?;
+        Inner {
+            root: current.root.clone(),
+            data: KnowledgeData::default(),
+            settings: current.settings.clone(),
+        }
+    };
+    let id = Uuid::new_v4();
+    let run_id = id.to_string();
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(180),
+        run_agent(
+            app,
+            state,
+            &inner,
+            backend,
+            &run_id,
+            id,
+            prompt,
+            None,
+            &[],
+            &[],
+            false,
+            None,
+        ),
+    )
+    .await;
+    if result.is_err() {
+        let _ = stop_agent(state, &run_id);
+    }
+    state.processes.lock().map_err(error)?.remove(&run_id);
+    state.cancelled_runs.lock().map_err(error)?.remove(&run_id);
+    let workspace = std::env::temp_dir()
+        .join("KnowledgeMasterAgentSessions")
+        .join(&run_id);
+    prepare_writable(&workspace);
+    let _ = fs::remove_dir_all(workspace);
+    result
+        .map_err(|_| "Agent 翻译超时，请重试；原文已保留".to_owned())?
+        .map(|value| value.answer)
 }
 
 pub async fn test_agent(

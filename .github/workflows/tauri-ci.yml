@@ -46,14 +46,42 @@ jobs:
       - name: Prepare portable Windows executable
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Copy-Item src-tauri/target/release/knowledge-master.exe KnowledgeMaster-portable.exe
+        run: |
+          Copy-Item src-tauri/target/release/knowledge-master.exe KnowledgeMaster-portable.exe
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          $portable = "KnowledgeMaster-$version-Windows-x64-portable"
+          New-Item -ItemType Directory $portable | Out-Null
+          Copy-Item KnowledgeMaster-portable.exe "$portable/KnowledgeMaster.exe"
+          Copy-Item docs/PORTABLE.txt "$portable/README.txt"
+          Compress-Archive -Path $portable -DestinationPath "$portable.zip"
+          Expand-Archive "$portable.zip" "$env:RUNNER_TEMP/portable-check"
+          $expected = (Get-FileHash KnowledgeMaster-portable.exe -Algorithm SHA256).Hash
+          $actual = (Get-FileHash "$env:RUNNER_TEMP/portable-check/$portable/KnowledgeMaster.exe" -Algorithm SHA256).Hash
+          if ($expected -ne $actual) { throw 'Portable executable hash mismatch' }
+      - name: Prepare and verify portable macOS app
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          version=$(node -p 'JSON.parse(require("fs").readFileSync("package.json", "utf8")).version')
+          arch=$(uname -m)
+          portable="KnowledgeMaster-$version-macOS-$arch-portable"
+          mkdir "$portable"
+          ditto "src-tauri/target/release/bundle/macos/知屿 KnowledgeMaster.app" "$portable/知屿 KnowledgeMaster.app"
+          codesign --force --deep --sign - "$portable/知屿 KnowledgeMaster.app"
+          codesign --verify --deep --strict "$portable/知屿 KnowledgeMaster.app"
+          cp docs/PORTABLE.txt "$portable/README.txt"
+          ditto -c -k --sequesterRsrc --keepParent "$portable" "$portable.zip"
+          ditto -x -k "$portable.zip" "$RUNNER_TEMP/portable-check"
+          codesign --verify --deep --strict "$RUNNER_TEMP/portable-check/$portable/知屿 KnowledgeMaster.app"
       - name: Upload macOS package
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
           name: KnowledgeMaster-macOS
           if-no-files-found: error
-          path: src-tauri/target/release/bundle/dmg/*.dmg
+          path: |
+            KnowledgeMaster-*-macOS-*-portable.zip
+            src-tauri/target/release/bundle/dmg/*.dmg
       - name: Upload Windows packages
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
@@ -62,6 +90,7 @@ jobs:
           if-no-files-found: error
           path: |
             KnowledgeMaster-portable.exe
+            KnowledgeMaster-*-Windows-x64-portable.zip
             src-tauri/target/release/bundle/nsis/*-setup.exe
 
   release:

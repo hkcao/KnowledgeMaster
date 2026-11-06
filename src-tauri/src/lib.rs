@@ -449,10 +449,11 @@ fn document_payload(state: State<'_, AppState>, id: Uuid) -> Result<ReaderDocume
 
 #[tauri::command]
 async fn translate_segments(
+    app: AppHandle,
     state: State<'_, AppState>,
     texts: Vec<String>,
 ) -> Result<Vec<String>, String> {
-    translation::translate(&state, texts).await
+    translation::translate(&app, &state, texts).await
 }
 
 #[tauri::command(async)]

@@ -118,6 +118,7 @@ pub fn load(root: &Path) -> Result<KnowledgeData, String> {
         topic_summaries: load_topic_summaries(&connection)?,
         summary_notes: load_summary_notes(&connection)?,
         note_links: load_note_links(&connection)?,
+        translation_sources: HashMap::new(),
     };
     crate::note_graph::prune(&mut data);
     for conversation in &mut data.conversations {
@@ -1290,6 +1291,7 @@ mod tests {
                 updated_at: timestamp.clone(),
             }],
             note_links: vec![],
+            translation_sources: HashMap::new(),
             summary_notes: vec![SummaryNote {
                 id: note_id,
                 title: "Overview".into(),

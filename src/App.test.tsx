@@ -4,7 +4,7 @@ import App from "./App";
 import { api } from "./api";
 import type { BootstrapState, KnowledgeData } from "./types";
 
-vi.mock("./api", () => ({ api: { bootstrap: vi.fn(), reload: vi.fn(), recommendations: vi.fn() } }));
+vi.mock("./api", () => ({ api: { bootstrap: vi.fn(), reload: vi.fn(), recommendations: vi.fn(), search: vi.fn() } }));
 vi.mock("@tauri-apps/api/webview", () => ({
   getCurrentWebview: () => ({ onDragDropEvent: async () => () => {} })
 }));
@@ -20,7 +20,7 @@ const initial: BootstrapState = {
   rootPath: "/test/source", data: empty, warnings: [],
   agentAvailability: { claudeCode: null, codex: null },
   settings: {
-    provider: "custom", baseURL: "", model: "", chatBackend: "direct", chatPlacement: "right",
+    provider: "custom", baseURL: "", model: "", translationBackend: "direct", chatBackend: "direct", chatPlacement: "right",
     libraryVisible: true, apiContextMode: "relevantFragments", visionEnabled: false, localOcrEnabled: true
   }
 };
@@ -34,6 +34,25 @@ beforeEach(() => {
   vi.mocked(api.recommendations).mockResolvedValue([]);
 });
 afterEach(cleanup);
+
+it("shows one original for bilingual search in both folders and unclassified documents", async () => {
+  const original = { id: "original", name: "paper.pdf", authors: [], extension: ".pdf", size: 1, sha256: "hash", importedAt: "2026-11-06T00:00:00Z", status: "ready" };
+  const translated = { ...original, id: "translated", name: "paper-中文.html", extension: ".html" };
+  vi.mocked(api.bootstrap).mockResolvedValue({ ...initial, data: {
+    ...empty, documents: [original, translated], translationSources: { translated: "original" },
+    topics: [{ id: "topic", name: "研究", createdAt: "" }],
+    documentTopics: [{ documentId: "original", topicId: "topic", createdAt: "" }, { documentId: "translated", topicId: "topic", createdAt: "" }]
+  } });
+  vi.mocked(api.search).mockResolvedValue(["original"]);
+  render(<App />);
+  expect(await screen.findByText("paper.pdf")).toBeVisible();
+  expect(screen.queryByText("paper-中文.html")).not.toBeInTheDocument();
+  expect(screen.getByText("1 份资料")).toBeVisible();
+  fireEvent.change(screen.getByPlaceholderText("搜索标题、作者、正文或主题"), { target: { value: "中文" } });
+  await waitFor(() => expect(api.search).toHaveBeenCalledWith("中文"));
+  expect(screen.getByText("paper.pdf")).toBeVisible();
+  expect(screen.queryByText("paper-中文.html")).not.toBeInTheDocument();
+});
 
 it("shows successful documents and skipped-file details, then clears resolved warnings", async () => {
   const data: KnowledgeData = {

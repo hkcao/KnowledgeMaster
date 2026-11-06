@@ -6,7 +6,7 @@
 
 KnowledgeMaster brings paper collection, close reading and annotation, research notes, multi-document Q&A, and knowledge synthesis into one desktop application. Your documents and metadata stay on your own disk by default. AI can access only the scope you explicitly authorize, and only when you initiate a request.
 
-> This page describes the `main` source branch. Full-document translation, the knowledge graph, and the blue theme are available in source; the current public `v0.2.8` packages do not include these additions. Check the notes for the Release you download.
+> v0.3.0 includes full-document translation, the knowledge graph, and the blue theme. Download a portable ZIP for macOS Apple Silicon or a portable EXE / ZIP for Windows x64 from [Releases](https://github.com/hkcao/KnowledgeMaster/releases).
 
 ## Interface Tour
 
@@ -63,7 +63,7 @@ Only the Knowledge Graph button opens the relationship workspace. Selecting a no
 - Connect any pair of notes or annotations in a zoomable, pannable knowledge graph. Existing annotation references appear automatically. Selecting a node highlights its entire connected chain or just direct neighbors.
 - The configured API can suggest connections with explanations; suggestions are saved only after confirmation. For larger libraries, analysis uses the 40 most relevant candidates and displays its scope.
 - Export either the original document or a copy with annotations.
-- Optionally translate full documents into Chinese when importing files, folders, dropped files, or web pages, using the configured API. Existing documents have a Translate action. Originals are retained and a searchable Chinese HTML document shares the library's image resources.
+- Optionally translate full documents into Chinese when importing files, folders, dropped files, or web pages, using an independently configured translation backend: direct API by default, or a detected and authenticated Claude Code / Codex CLI. Existing documents have a Translate action. Originals are retained and a searchable Chinese HTML document shares the library's image resources. Search covers both languages and merges matches into the original; the directory lists only originals. A retained translation becomes visible independently if its original is deleted.
 - Read alternating source/Chinese paragraphs or parallel panes with paragraph-based synchronized scrolling. Text PDFs retain page graphics and text positions; scanned pages retain the scan with translated OCR below it. DOCX preserves paragraphs, tables, and embedded images; complex Word pagination and floating layouts may differ. Convert DOC to DOCX/PDF first. Code and formulas stay unchanged.
 
 ### AI and Local Agents
@@ -95,7 +95,7 @@ Only the Knowledge Graph button opens the relationship workspace. Selecting a no
 | WebView | System WebKit | WebView2 |
 | Credentials | Keychain | Credential Manager |
 | Agent termination | Terminate the process | Terminate the process tree with `taskkill /T` |
-| Release packages | `.dmg` | Portable `.exe` / NSIS installer `.exe` |
+| Release packages | Portable `.zip` / `.dmg` | Portable `.exe` / `.zip` / NSIS installer `.exe` |
 
 Shared stack:
 
@@ -116,13 +116,13 @@ KnowledgeMaster does not use Electron, require a hosted application backend, or 
 3. The portable build requires WebView2. Recent Windows 10/11 installations normally include it. If the application does not start, install Microsoft Edge WebView2 Runtime first. The installer build can bootstrap a missing runtime over the network.
 4. Unsigned releases may trigger Windows SmartScreen. Verify that the file came from this repository's Release page, then choose **More info > Run anyway**.
 5. On first launch, choose a library directory in Settings. For cross-device synchronization, you may choose a OneDrive directory, but do not modify the same library from two computers at the same time.
-6. An API key is needed only when using AI. Configure DeepSeek, Zhipu GLM, or a custom OpenAI-compatible endpoint in Settings. The key is read on demand and stored in Windows Credential Manager.
+6. Direct API features need a model connection and API key in Settings, stored in Windows Credential Manager and read on demand. Translation or chat through an authenticated Claude Code / Codex CLI does not require an application API key.
 
 If a Release does not yet contain a Windows package, build it from source with the instructions below.
 
 ### macOS
 
-Download the `.dmg` from [GitHub Releases](https://github.com/hkcao/KnowledgeMaster/releases), open it, drag KnowledgeMaster into Applications, and launch it. Because current builds are not Apple-notarized, macOS may require approval under **System Settings > Privacy & Security** the first time you open the app.
+Download `KnowledgeMaster-0.3.0-macOS-arm64-portable.zip` from [GitHub Releases](https://github.com/hkcao/KnowledgeMaster/releases), unzip it, and open the app directly. A `.dmg` is also available to drag KnowledgeMaster into Applications. Because current builds are not Apple-notarized, macOS may require approval under **System Settings > Privacy & Security** the first time you open the app.
 
 ### Local CPU OCR (v0.2.8 and later)
 
