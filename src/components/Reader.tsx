@@ -8,6 +8,7 @@ import {
   Download,
   Highlighter,
   ListTree,
+  Languages,
   Maximize2,
   MessageSquareText,
   Minus,
@@ -26,12 +27,15 @@ import type {
   KnowledgeAnnotation,
   KnowledgeData,
   KnowledgeDocument,
+  DocumentTranslation,
   ReaderDocumentPayload,
   ReaderQuote,
   UUID
 } from "../types";
 import { displayTitle, fitPDFScale, formatBytes, normalizeAnnotationRects, pdfOutputScale, selectionToolbarPosition } from "../utils";
 import MarkdownView from "./MarkdownView";
+import TranslationView from "./TranslationView";
+import { translateDocument } from "../translation";
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
 
@@ -41,6 +45,7 @@ interface Props {
   focusedAnnotationId?: UUID | null;
   layoutRevision: number;
   onData: (data: KnowledgeData) => void;
+  onOpenDocument: (document: KnowledgeDocument) => void;
   onAsk: (quote: ReaderQuote) => void;
 }
 
@@ -61,7 +66,7 @@ interface OutlineEntry {
   anchor?: string;
 }
 
-export default function Reader({ document, data, focusedAnnotationId, layoutRevision, onData, onAsk }: Props) {
+export default function Reader({ document, data, focusedAnnotationId, layoutRevision, onData, onAsk, onOpenDocument }: Props) {
   const [payload, setPayload] = useState<ReaderDocumentPayload | null>(null);
   const [selection, setSelection] = useState<SelectionState | null>(null);
   const [showOutline, setShowOutline] = useState(false);
@@ -71,16 +76,27 @@ export default function Reader({ document, data, focusedAnnotationId, layoutRevi
   const [noteDraft, setNoteDraft] = useState("");
   const [error, setError] = useState("");
   const [navigationPage, setNavigationPage] = useState<number | null>(null);
+  const [translation, setTranslation] = useState<DocumentTranslation | null>(null);
+  const [translationMode, setTranslationMode] = useState<"original" | "parallel" | "interleaved">("original");
+  const [translationProgress, setTranslationProgress] = useState("");
+  const translationRun = useRef<(() => void) | null>(null);
   const readerRef = useRef<HTMLDivElement>(null);
   const currentPageRef = useRef(0);
 
   useEffect(() => {
+    let active = true;
+    setError("");
+    setTranslation(null);
+    setTranslationMode("original");
+    setTranslationProgress("");
     setPayload(null);
     setSelection(null);
     setOutline([]);
     setNavigationPage(null);
     if (!document) return;
-    api.documentPayload(document.id).then(setPayload).catch((value) => setError(String(value)));
+    api.documentPayload(document.id).then((value) => { if (active) setPayload(value); }).catch((value) => { if (active) setError(String(value)); });
+    api.loadTranslation(document.id).then((value) => { if (active) setTranslation(value); }).catch((value) => { if (active) setError(String(value)); });
+    return () => { active = false; translationRun.current?.(); };
   }, [document?.id]);
 
   useEffect(() => {
@@ -91,6 +107,13 @@ export default function Reader({ document, data, focusedAnnotationId, layoutRevi
     setEditing(annotation);
     setNoteDraft(annotation.note);
   }, [focusedAnnotationId]);
+
+  useEffect(() => {
+    if (translation?.documentId && !data.documents.some((item) => item.id === translation.documentId)) {
+      setTranslation(null);
+      setTranslationMode("original");
+    }
+  }, [data.documents, translation?.documentId]);
 
   useEffect(() => {
     if (!document || document.extension !== ".pdf") return;
@@ -161,6 +184,23 @@ export default function Reader({ document, data, focusedAnnotationId, layoutRevi
     }
   }
 
+  async function startTranslation() {
+    if (!document || translationProgress) return;
+    const source = document;
+    // Keep a per-run cancellation flag when switching documents.
+    const run = { cancelled: false };
+    translationRun.current?.();
+    translationRun.current = () => { run.cancelled = true; };
+    setTranslationProgress("正在准备全文翻译…");
+    try {
+      const next = await translateDocument(source, (detail) => { if (!run.cancelled) setTranslationProgress(detail); }, () => run.cancelled);
+      if (next) onData(next);
+      const value = await api.loadTranslation(source.id);
+      if (!run.cancelled) { setTranslation(value); setTranslationMode("parallel"); }
+    } catch (value) { if (!run.cancelled) setError(String(value)); }
+    finally { if (!run.cancelled) setTranslationProgress(""); }
+  }
+
   return (
     <main className="reader-shell" ref={readerRef}>
       <header className="reader-header">
@@ -168,7 +208,13 @@ export default function Reader({ document, data, focusedAnnotationId, layoutRevi
           <Quote size={18} />
           <span><strong>{displayTitle(document)}</strong><small>{formatBytes(document.size)}{document.pageCount ? ` · ${document.pageCount} 页` : ""}</small></span>
         </div>
-        <button className={showOutline ? "active" : ""} onClick={() => setShowOutline(!showOutline)}><ListTree size={15} />目录</button>
+        <button disabled={translationMode !== "original"} className={showOutline ? "active" : ""} onClick={() => setShowOutline(!showOutline)}><ListTree size={15} />目录</button>
+        {translation ? <>
+          <select aria-label="双语阅读模式" value={translationMode} onChange={(event) => { setTranslationMode(event.target.value as typeof translationMode); setSelection(null); setShowOutline(false); }}>
+            <option value="original">原文</option><option value="interleaved">段落中英交替</option><option value="parallel">左右同步对照</option>
+          </select>
+          <button onClick={() => { const target = data.documents.find((d) => d.id === translation.documentId); if (target) onOpenDocument(target); }}>打开中文文档</button>
+        </> : <button disabled={!payload || !!translationProgress} onClick={() => void startTranslation()}><Languages size={15} />翻译全文</button>}
         <details className="header-menu">
           <summary><Download size={15} />导出</summary>
           <div className="popover-menu right">
@@ -178,6 +224,7 @@ export default function Reader({ document, data, focusedAnnotationId, layoutRevi
         </details>
         <button disabled={!annotations.length} onClick={() => setShowAnnotations(true)}>批注 {annotations.length}</button>
       </header>
+      {translationProgress && <div className="translation-progress" role="status">{translationProgress}<button onClick={() => { translationRun.current?.(); setTranslationProgress(""); }}>取消翻译</button></div>}
       <div className="reader-content">
         {showOutline && (
           <aside className="outline-panel">
@@ -197,7 +244,7 @@ export default function Reader({ document, data, focusedAnnotationId, layoutRevi
           </aside>
         )}
         <section className="document-viewport">
-          {!payload ? <div className="loading-state">正在载入文档…</div> : payload.kind === "pdf" ? (
+          {translation && translationMode !== "original" ? <TranslationView value={translation} mode={translationMode} /> : !payload ? <div className="loading-state">正在载入文档…</div> : payload.kind === "pdf" ? (
             <PDFReader
               documentId={document.id}
               base64={payload.content}

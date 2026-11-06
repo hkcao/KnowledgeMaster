@@ -20,6 +20,7 @@ keyring = { version = "3", features = ["apple-native", "windows-native"] }
 lopdf = "0.38"
 pdf-extract = "0.10"
 regex = "1"
+quick-xml = "0.41"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 scraper = "0.24"

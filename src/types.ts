@@ -143,7 +143,20 @@ export interface KnowledgeData {
   conversations: Conversation[];
   topicSummaries: Array<{ topicId: UUID; summary: string; updatedAt: string }>;
   summaryNotes: SummaryNote[];
+  noteLinks?: NoteLink[];
 }
+
+export interface NoteLink {
+  id: UUID;
+  source: string;
+  target: string;
+  reason: string;
+  createdBy: "manual" | "model";
+  createdAt: string;
+}
+
+export interface NoteSuggestion { target: string; reason: string }
+export interface NoteSuggestions { suggestions: NoteSuggestion[]; candidateCount: number; totalCount: number }
 
 export interface AppSettings {
   provider: "deepseek" | "glm" | "custom";
@@ -182,6 +195,14 @@ export interface ReaderDocumentPayload {
   content: string;
   extractedText: string;
   pages: Array<{ number: number; text: string }>;
+}
+
+export interface DocumentTranslation {
+  sourceId: UUID;
+  sourceSha256: string;
+  documentId?: UUID | null;
+  originalHtml: string;
+  translatedHtml: string;
 }
 
 export interface TopicRecommendation {

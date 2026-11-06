@@ -293,6 +293,32 @@ pub struct SummaryNoteInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct NoteLink {
+    pub id: Uuid,
+    pub source: String,
+    pub target: String,
+    pub reason: String,
+    pub created_by: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteSuggestion {
+    pub target: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteSuggestions {
+    pub suggestions: Vec<NoteSuggestion>,
+    pub candidate_count: usize,
+    pub total_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ExtractedPage {
     pub number: usize,
     pub text: String,
@@ -328,6 +354,8 @@ pub struct KnowledgeData {
     pub topic_summaries: Vec<TopicSummary>,
     #[serde(default)]
     pub summary_notes: Vec<SummaryNote>,
+    #[serde(default)]
+    pub note_links: Vec<NoteLink>,
 }
 
 impl Default for KnowledgeData {
@@ -342,6 +370,7 @@ impl Default for KnowledgeData {
             conversations: vec![],
             topic_summaries: vec![],
             summary_notes: vec![],
+            note_links: vec![],
         }
     }
 }

@@ -64,7 +64,7 @@ export default function ChatPanel(props: Props) {
   const [draft, setDraft] = useState("");
   const [selectedDocuments, setSelectedDocuments] = useState<Set<UUID>>(new Set());
   const [selectedTopics, setSelectedTopics] = useState<Set<UUID>>(new Set());
-  const [includeCurrent, setIncludeCurrent] = useState(false);
+  const [includeCurrent, setIncludeCurrent] = useState(settings.chatBackend !== "direct");
   const [includeAnnotations, setIncludeAnnotations] = useState(true);
   const [sending, setSending] = useState(false);
   const [runId, setRunId] = useState<UUID | null>(null);
@@ -85,6 +85,10 @@ export default function ChatPanel(props: Props) {
   const [importTopicSelection, setImportTopicSelection] = useState<Set<string>>(new Set());
   const [classifyingImports, setClassifyingImports] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (settings.chatBackend !== "direct") setIncludeCurrent(true);
+  }, [settings.chatBackend]);
 
   useEffect(() => {
     const unlisten = listen<{ runId: UUID; event: AgentTraceEvent }>("agent-trace", ({ payload }) => {
@@ -266,7 +270,8 @@ export default function ChatPanel(props: Props) {
     }
   }
 
-  const pureChat = !selectedDocuments.size && !selectedTopics.size && !includeCurrent && !quote;
+  const effectiveDocuments = new Set(resolveDocumentIDs(selectedDocuments, currentDocument?.id, includeCurrent, quote));
+  const pureChat = !effectiveDocuments.size && !selectedTopics.size && !quote;
   const backendLabel = settings.chatBackend === "direct"
     ? `${settings.model} · 直接 API`
     : `${settings.chatBackend === "codex" ? "Codex" : "Claude Code"} · 本机 Agent`;
@@ -282,7 +287,7 @@ export default function ChatPanel(props: Props) {
             setConversation(newConversation());
             setSelectedDocuments(new Set());
             setSelectedTopics(new Set());
-            setIncludeCurrent(false);
+            setIncludeCurrent(settings.chatBackend !== "direct");
             onQuote(null);
           }}><Plus size={17} /></button>
           <PlacementMenu value={settings.chatPlacement} onChange={(chatPlacement) => persistSettings({ ...settings, chatPlacement })} />
@@ -314,15 +319,16 @@ export default function ChatPanel(props: Props) {
         {showScope && (
           <div className="scope-body">
             <details>
-              <summary>选择文件（{selectedDocuments.size}）</summary>
+              <summary>选择文件（{effectiveDocuments.size}）</summary>
               <div className="scope-picker">
                 <label className="scope-search">
                   <FileSearch size={14} />
                   <input value={scopeQuery} onChange={(event) => setScopeQuery(event.target.value)} placeholder="搜索标题、作者或正文" />
                 </label>
                 {data.documents.filter((document) => !scopeMatches || scopeMatches.has(document.id)).map((document) => (
-                  <label className="scope-document-option" key={document.id}><input type="checkbox" checked={selectedDocuments.has(document.id)} onChange={(event) => {
+                  <label className="scope-document-option" key={document.id}><input type="checkbox" checked={effectiveDocuments.has(document.id)} onChange={(event) => {
                     const next = new Set(selectedDocuments);
+                    if (!event.target.checked && currentDocument?.id === document.id) setIncludeCurrent(false);
                     if (event.target.checked) next.add(document.id); else next.delete(document.id);
                     setSelectedDocuments(next);
                   }} /><span>{displayTitle(document)}{document.authors.length > 0 && <small>{document.authors.join(" · ")}</small>}</span></label>
@@ -346,13 +352,14 @@ export default function ChatPanel(props: Props) {
             <label><input type="checkbox" checked={includeAnnotations} onChange={(event) => setIncludeAnnotations(event.target.checked)} />包含所选范围内的批注</label>
           </div>
         )}
-        <small>{pureChat ? "纯聊天：本轮不会加载本地文档或批注；Agent 可按问题使用网页搜索。" : `已选择 ${selectedDocuments.size} 份文件、${selectedTopics.size} 个主题，将按授权范围查询。`}</small>
-        {selectedDocuments.size > 0 && (
+        <small>{pureChat ? "纯聊天：本轮不会加载本地文档或批注；Agent 可按问题使用网页搜索。" : `已选择 ${effectiveDocuments.size} 份文件、${selectedTopics.size} 个主题，将按授权范围查询。`}</small>
+        {effectiveDocuments.size > 0 && (
           <div className="selected-document-chips" aria-label="已选择的问答文档">
-            {data.documents.filter((document) => selectedDocuments.has(document.id)).map((document) => (
+            {data.documents.filter((document) => effectiveDocuments.has(document.id)).map((document) => (
               <button key={document.id} title={`移除 ${displayTitle(document)}`} onClick={() => {
                 const next = new Set(selectedDocuments);
                 next.delete(document.id);
+                if (document.id === currentDocument?.id) setIncludeCurrent(false);
                 setSelectedDocuments(next);
               }}><FileText size={12} /><span>{displayTitle(document)}</span><X size={11} /></button>
             ))}

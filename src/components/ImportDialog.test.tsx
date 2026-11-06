@@ -1,0 +1,40 @@
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import ImportDialog from "./ImportDialog";
+import { api } from "../api";
+import { translateDocument } from "../translation";
+import type { BootstrapState, KnowledgeData } from "../types";
+vi.mock("../api", () => ({ api: { bootstrap: vi.fn(), importFiles: vi.fn() } }));
+vi.mock("../translation", () => ({ translateDocument: vi.fn() }));
+const empty: KnowledgeData = { version: 8, documents: [], topics: [], documentTopics: [], bookmarks: [], annotations: [], conversations: [], topicSummaries: [], summaryNotes: [] };
+const docs = ["one", "two"].map((id) => ({ id, name: `${id}.txt`, extension: ".txt", size: 1, authors: [], sha256: id, importedAt: "", status: "ready" }));
+const imported = { ...empty, documents: docs };
+const initial: BootstrapState = { data: empty, rootPath: "/test/source", warnings: [], agentAvailability: { codex: null, claudeCode: null }, settings: { provider: "custom", baseURL: "", model: "", chatBackend: "direct", chatPlacement: "right", libraryVisible: true, apiContextMode: "relevantFragments", visionEnabled: false, localOcrEnabled: true } };
+beforeEach(() => {
+  vi.resetAllMocks();
+  vi.mocked(api.bootstrap).mockResolvedValueOnce(initial).mockResolvedValueOnce({ ...initial, data: imported });
+  vi.mocked(api.importFiles).mockResolvedValue(["已导入"]);
+});
+afterEach(cleanup);
+it("does not translate unless the import option is checked", async () => {
+  const onData = vi.fn(), onComplete = vi.fn();
+  render(<ImportDialog paths={["/one.txt"]} onData={onData} onComplete={onComplete} />);
+  expect(screen.getByRole("checkbox")).not.toBeChecked();
+  fireEvent.click(screen.getByRole("button", { name: "开始导入" }));
+  await screen.findByRole("button", { name: "完成" });
+  expect(translateDocument).not.toHaveBeenCalled();
+  expect(onData).toHaveBeenCalledWith(imported);
+  fireEvent.click(screen.getByRole("button", { name: "完成" }));
+  expect(onComplete).toHaveBeenCalledWith(["one", "two"]);
+});
+it("keeps originals and continues translating other documents when one fails", async () => {
+  vi.mocked(translateDocument).mockRejectedValueOnce(new Error("翻译内容不完整")).mockResolvedValueOnce(imported);
+  const onData = vi.fn();
+  render(<ImportDialog paths={["/folder"]} onData={onData} onComplete={vi.fn()} />);
+  fireEvent.click(screen.getByRole("checkbox"));
+  fireEvent.click(screen.getByRole("button", { name: "开始导入" }));
+  await waitFor(() => expect(translateDocument).toHaveBeenCalledTimes(2));
+  expect(await screen.findByText(/one.txt.*翻译内容不完整/)).toBeVisible();
+  expect(screen.getByText("已生成中文文档：two.txt")).toBeVisible();
+  expect(onData).toHaveBeenCalledWith(imported);
+});

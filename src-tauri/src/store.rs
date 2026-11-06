@@ -783,6 +783,11 @@ fn import_one_with_storage(
         let _ = fs::remove_file(&index_path);
         return Err(value);
     }
+    if matches!(extension.as_str(), "html" | "htm" | "md" | "markdown") {
+        // Keep the original bytes; collect referenced images in a shared resource directory.
+        let _ =
+            crate::document_assets::snapshot(&inner.root, id, path, document.source_url.as_deref());
+    }
     let stored = if adopt_source {
         fs::rename(path, &destination)
     } else {
@@ -897,6 +902,7 @@ pub fn delete_document(inner: &mut Inner, id: Uuid) -> Result<(), String> {
             conversation.current_document_id = None;
         }
     }
+    crate::note_graph::prune(&mut inner.data);
     save_data(&inner.root, &inner.data)
 }
 
@@ -1173,6 +1179,8 @@ pub fn reader_payload(inner: &Inner, id: Uuid) -> Result<ReaderDocumentPayload, 
         )
     } else if matches!(extension, ".html" | ".htm") {
         ("html".into(), fs::read_to_string(path).map_err(error)?)
+    } else if extension == ".docx" {
+        ("html".into(), crate::document_assets::docx_html(&path)?)
     } else if matches!(extension, ".md" | ".markdown") {
         ("markdown".into(), fs::read_to_string(path).map_err(error)?)
     } else {
@@ -1180,7 +1188,11 @@ pub fn reader_payload(inner: &Inner, id: Uuid) -> Result<ReaderDocumentPayload, 
     };
     Ok(ReaderDocumentPayload {
         kind,
-        content,
+        content: if matches!(extension, ".html" | ".htm" | ".md" | ".markdown") {
+            crate::document_assets::resolve(&inner.root, id, &content)
+        } else {
+            content
+        },
         extracted_text: extracted.text,
         pages: extracted.pages,
     })

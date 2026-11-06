@@ -7,6 +7,8 @@ import LibrarySidebar from "./components/LibrarySidebar";
 import Reader from "./components/Reader";
 import ChatPanel from "./components/ChatPanel";
 import SettingsModal from "./components/SettingsModal";
+import ImportDialog from "./components/ImportDialog";
+import BrandMark from "./components/BrandMark";
 import { availableChatBackend, clampChatPanelWidth, displayTitle } from "./utils";
 
 const CHAT_WIDTH_KEY = "knowledgemaster.rightChatWidth";
@@ -18,6 +20,7 @@ export default function App() {
   const [quote, setQuote] = useState<ReaderQuote | null>(null);
   const [focusedAnnotationId, setFocusedAnnotationId] = useState<UUID | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [importPaths, setImportPaths] = useState<string[]>([]);
   const [lastChatPlacement, setLastChatPlacement] = useState<"right" | "bottom" | "sidebar">("right");
   const [layoutRevision, setLayoutRevision] = useState(0);
   const [externalRecommendationIds, setExternalRecommendationIds] = useState<UUID[]>([]);
@@ -49,13 +52,7 @@ export default function App() {
     getCurrentWebview().onDragDropEvent((event) => {
       if (event.payload.type === "drop" && event.payload.paths.length) {
         const paths = event.payload.paths;
-        void api.reload().then(async (before) => {
-          const previous = new Set(before.data.documents.map((document) => document.id));
-          await api.importFiles(paths);
-          const { data, warnings } = await api.reload();
-          setState((value) => value ? { ...value, data, warnings } : value);
-          setExternalRecommendationIds(data.documents.filter((document) => !previous.has(document.id)).map((document) => document.id));
-        });
+        setImportPaths((current) => current.length ? current : paths);
       }
     }).then((value) => { unlisten = value; });
     return () => unlisten?.();
@@ -124,7 +121,7 @@ export default function App() {
     window.addEventListener("pointerup", stop, { once: true });
   }
 
-  if (!state) return <div className="boot-screen"><span className="brand-mark large">屿</span><strong>知屿</strong><span>{bootError || "正在打开知识库…"}</span></div>;
+  if (!state) return <div className="boot-screen"><BrandMark large /><strong>知屿</strong><span>{bootError || "正在打开知识库…"}</span></div>;
 
   const { settings } = state;
   const showLibrary = settings.libraryVisible;
@@ -149,6 +146,7 @@ export default function App() {
   );
   const library = (
     <LibrarySidebar
+      onImportPaths={setImportPaths}
       data={state.data}
       rootPath={state.rootPath}
       settings={settings}
@@ -212,6 +210,7 @@ export default function App() {
             focusedAnnotationId={focusedAnnotationId}
             layoutRevision={layoutRevision}
             onData={updateData}
+            onOpenDocument={openDocument}
             onAsk={(value) => {
               setQuote(value);
               if (placement === "hidden") {
@@ -236,6 +235,10 @@ export default function App() {
         </>}
       </div>
       {settingsOpen && <SettingsModal state={state} onState={setState} onClose={() => setSettingsOpen(false)} />}
+      {importPaths.length > 0 && <ImportDialog paths={importPaths} onData={updateData} onComplete={(ids) => {
+        setImportPaths([]);
+        setExternalRecommendationIds(ids);
+      }} />}
     </div>
   );
 }

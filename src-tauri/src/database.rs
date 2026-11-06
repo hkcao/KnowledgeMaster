@@ -10,7 +10,7 @@ use std::{
 };
 use uuid::Uuid;
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 const DATA_VERSION: usize = 8;
 
 pub fn load_or_migrate(root: &Path) -> Result<KnowledgeData, String> {
@@ -102,6 +102,7 @@ fn repair_legacy_relations(data: &mut KnowledgeData) {
         note.annotation_ids
             .retain(|id| linked_annotations.insert(*id));
     }
+    crate::note_graph::prune(data);
 }
 
 pub fn load(root: &Path) -> Result<KnowledgeData, String> {
@@ -116,7 +117,9 @@ pub fn load(root: &Path) -> Result<KnowledgeData, String> {
         conversations: load_conversations(&connection)?,
         topic_summaries: load_topic_summaries(&connection)?,
         summary_notes: load_summary_notes(&connection)?,
+        note_links: load_note_links(&connection)?,
     };
+    crate::note_graph::prune(&mut data);
     for conversation in &mut data.conversations {
         conversation.summary_message_count = conversation
             .summary_message_count
@@ -138,6 +141,7 @@ pub fn save(root: &Path, data: &KnowledgeData) -> Result<(), String> {
     save_conversations(&transaction, &mut sync, &data.conversations)?;
     save_topic_summaries(&transaction, &mut sync, &data.topic_summaries)?;
     save_summary_notes(&transaction, &mut sync, &data.summary_notes)?;
+    save_note_links(&transaction, &mut sync, &data.note_links)?;
     sync.remove_deleted(&transaction)?;
     transaction
         .execute(
@@ -337,6 +341,17 @@ CREATE TABLE IF NOT EXISTS summary_note_annotations (
     PRIMARY KEY(note_id, annotation_id)
 );
 CREATE INDEX IF NOT EXISTS idx_summary_note_annotations_annotation ON summary_note_annotations(annotation_id);
+CREATE TABLE IF NOT EXISTS note_links (
+    id TEXT PRIMARY KEY,
+    position INTEGER NOT NULL,
+    source_key TEXT NOT NULL,
+    target_key TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    created_by TEXT NOT NULL CHECK(created_by IN ('manual', 'model')),
+    created_at TEXT NOT NULL,
+    CHECK(source_key < target_key),
+    UNIQUE(source_key, target_key)
+);
 CREATE TABLE IF NOT EXISTS entity_fingerprints (
     entity_type TEXT NOT NULL,
     entity_id TEXT NOT NULL,
@@ -427,6 +442,7 @@ impl SyncState {
                 "conversation" => delete(transaction, "conversations", "id", &entity_id)?,
                 "topic_summary" => delete(transaction, "topic_summaries", "topic_id", &entity_id)?,
                 "summary_note" => delete(transaction, "summary_notes", "id", &entity_id)?,
+                "note_link" => delete(transaction, "note_links", "id", &entity_id)?,
                 _ => {}
             }
             transaction
@@ -692,6 +708,53 @@ fn save_summary_notes(
         sync.record(transaction, "summary_note", &id)?;
     }
     Ok(())
+}
+
+fn save_note_links(
+    transaction: &Transaction<'_>,
+    sync: &mut SyncState,
+    values: &[NoteLink],
+) -> Result<(), String> {
+    for (position, value) in values.iter().enumerate() {
+        let id = value.id.to_string();
+        if !sync.changed("note_link", &id, position, value)? {
+            continue;
+        }
+        transaction.execute(
+            "INSERT INTO note_links(id, position, source_key, target_key, reason, created_by, created_at) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7) ON CONFLICT(id) DO UPDATE SET position=excluded.position, source_key=excluded.source_key, target_key=excluded.target_key, reason=excluded.reason, created_by=excluded.created_by, created_at=excluded.created_at",
+            params![id, position as i64, value.source, value.target, value.reason, value.created_by, value.created_at],
+        ).map_err(error)?;
+        sync.record(transaction, "note_link", &id)?;
+    }
+    Ok(())
+}
+
+fn load_note_links(connection: &Connection) -> Result<Vec<NoteLink>, String> {
+    let mut statement = connection.prepare("SELECT id, source_key, target_key, reason, created_by, created_at FROM note_links ORDER BY position").map_err(error)?;
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+            ))
+        })
+        .map_err(error)?;
+    rows.map(|row| {
+        let (id, source, target, reason, created_by, created_at) = row.map_err(error)?;
+        Ok(NoteLink {
+            id: uuid(&id)?,
+            source,
+            target,
+            reason,
+            created_by,
+            created_at,
+        })
+    })
+    .collect()
 }
 
 fn load_documents(connection: &Connection) -> Result<Vec<KnowledgeDocument>, String> {
@@ -1226,6 +1289,7 @@ mod tests {
                 summary: "topic summary".into(),
                 updated_at: timestamp.clone(),
             }],
+            note_links: vec![],
             summary_notes: vec![SummaryNote {
                 id: note_id,
                 title: "Overview".into(),
@@ -1236,6 +1300,36 @@ mod tests {
                 updated_at: timestamp,
             }],
         }
+    }
+
+    #[test]
+    fn schema_one_upgrades_without_changing_existing_notes_or_annotations() {
+        let root = tempfile::tempdir().unwrap();
+        let data = sample_data();
+        save(root.path(), &data).unwrap();
+        let connection = Connection::open(database_path(root.path())).unwrap();
+        connection
+            .execute_batch("DROP TABLE note_links; PRAGMA user_version=1;")
+            .unwrap();
+        drop(connection);
+        let loaded = load(root.path()).unwrap();
+        assert_eq!(
+            serde_json::to_value(&loaded).unwrap(),
+            serde_json::to_value(&data).unwrap()
+        );
+        assert!(loaded.note_links.is_empty());
+        let connection = connect(root.path()).unwrap();
+        assert_eq!(
+            connection
+                .pragma_query_value::<i64, _>(None, "user_version", |r| r.get(0))
+                .unwrap(),
+            2
+        );
+        drop(connection);
+        assert_eq!(
+            serde_json::to_value(load(root.path()).unwrap()).unwrap(),
+            serde_json::to_value(data).unwrap()
+        );
     }
 
     #[test]
@@ -1282,6 +1376,7 @@ mod tests {
             expected.documents[0].authors.clear();
             let mut legacy = serde_json::to_value(&expected).unwrap();
             legacy["version"] = version.into();
+            legacy.as_object_mut().unwrap().remove("noteLinks");
             let document = legacy["documents"][0].as_object_mut().unwrap();
             document.remove("authors");
             let url = document.remove("sourceUrl").unwrap();

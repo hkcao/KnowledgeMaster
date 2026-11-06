@@ -1,6 +1,6 @@
 # KnowledgeMaster 开发交接
 
-更新日期：2026-10-27（Asia/Shanghai）
+更新日期：2026-11-06（Asia/Shanghai）
 
 本文档供后续 Codex/开发者在新窗口中继续工作。开始前请以实际 `git status`、远端分支、GitHub Actions 和 Release 为准；本文记录的是上述日期核验过的状态。
 
@@ -8,7 +8,7 @@
 
 ## 0. 首轮 Windows PDF 刷新闪退修复（2026-10-26）
 
-本节及 0.1 节保留首轮修复时的历史记录；当前 Git/发布状态见 0.2 节，逐文件容错见 0.3 节，CPU OCR 见 0.4 节，本次提交/发布进度见 0.5 节。历史“失败即返回”行为已由 0.3 节替代。
+本节及 0.1 节保留首轮修复时的历史记录；上次发布见 0.5 节，当前功能和入口纠正见 0.6 / 0.7 / 0.9 节，本地试用包以 0.9 节 r2 为准，0.8 节保留首包记录。历史“失败即返回”行为已由 0.3 节替代。
 
 - **用户报告**：Windows 11、`0.2.6` portable，把任意 PDF 复制到资料库 `source/` 后点击刷新目录，应用退出。当前开发机为 macOS，仅安装 `aarch64-apple-darwin` Rust target；尚未在 Windows 真机复现或确认修复。
 - **确认的代码缺陷**：`reload_library` / `import_files` 原为同步 Tauri command；`extract_path` 直接调用 `pdf-extract 0.10.0`，未隔离解析器 panic。不支持的字体编码可以触发 `pdf-extract/src/lib.rs:359` 的 `unexpected encoding` panic，并沿持有资料库 Mutex 的命令栈传播。新增测试在修复前确实失败，修复后通过。这是已复现的缺陷，不等于已证明用户“任意 PDF”闪退的唯一原因。
@@ -77,6 +77,56 @@
 - **日志限制与现存注记**：尝试读取详细 run log 时，gh CLI 因写入受限的 `~/.cache/gh/run-log-...zip` 失败；没有继续要求家目录缓存写权限，使用可读的 CI 作业/步骤 success 元数据及公开附件核验结果作为发布证据，未取得 Windows OCR 精确耗时。Actions 有既有 Node 20 退役/强制使用 Node 24、macOS runner 容量和 ubuntu-latest 迁移提示，未影响构建发布。
 - **当前状态与下一步**：功能、版本和 CI 已提交/推送并正式发布；本文档的发布证据随 docs-only 后续提交推送（使用 `[skip ci]` 避免重复构建）。后续是用户 Windows 11 桌面验收：资料库刷新、好坏文件混合处理、设置一键下载、ModelScope 源、取消重试和离线 OCR。CI 为 Windows Server 2022 runner，不等于用户桌面交互验收；无需再次发布相同二进制。
 
+### 0.6 全文中文翻译、双语阅读与 Agent 默认上下文（2026-11-06，本地未提交）
+
+- **需求与状态**：实现用户新增的三项需求：导入时选择全文翻译为中文；段落中英交替/左右同步对照；Agent 默认勾选当前阅读文档；应用图标美化。版本仍为 `0.2.8`，分支 `tauri-codex`，HEAD `e39c1051cdbdfb5769b4965c053c565d733823d9`。本轮开始时工作区干净；所有本轮修改和新增文件均未暂存、未提交、未推送。本轮没有创建标签、安装包或发布，0.5 节为上次发布证据，未在本轮重查远端 CI/Release。
+- **入口与流程**：`App.tsx` 将文件选择、目录和拖放统一交给 `ImportDialog.tsx`，翻译复选框默认关闭；网页导入在 `LibrarySidebar.tsx` 中也有选项。旧文档可通过 `Reader.tsx` 的“翻译全文”补译。翻译复用设置中的直接 API（独立于当前问答 backend），不启动 CLI Agent、不读取用户 Key 做验证；只在真实翻译请求时按现有凭据流程取 Key。Agent 下载待确认流程仍原样保留，可在导入后阅读器补译。
+- **全文与结构**：`src/translation.tsx::translateHtml()` 对整篇结构化 HTML 文本节点分批翻译；每段最多 3000 UTF-16 字符，每批最多 80 项/6000 字符，不截取文档前缀。代码与公式保持原样，图片、URL、内联标签不交给模型修改；文档内嵌 CSS 尽量内联到自身元素，避免污染应用；不执行网页脚本或下载外部样式表，不保证依赖这些资源的网页原样还原。`translation.rs::translate()` 每批最多 100 项/10000 Unicode 字符，180 秒超时，严格校验 JSON 数组数量及非空项，失败/取消不生成残缺译文，原文仍保留；成功批次不作跨任务断点缓存，重试从头翻译。
+- **PDF 与 Word**：PDF.js 使用 `getTextContent()` 和 `getOperatorList()`，按文字坐标分组，将去除文字绘制操作后的页面图形保存为共享 PNG，原文与中文复用背景；中文按原文字框缩放字号。空白页保留；有栅格图但没有 OCR 文本的扫描页会明确报错，避免静默遗漏。扫描页有 OCR 时保留原扫描图，在下方重排译文；复杂双栏/旋转文字/公式尚未建立质量基线，不能承诺逐像素一致。`document_assets.rs::docx_html()` 用现有锁定版本的 `quick-xml 0.41` 解析 DOCX 段落、表格和嵌入图片；不保证 Word 样式、浮动对象和分页完全还原。DOC 仍须先转为 DOCX/PDF，不能把旧 DOC 占位提示当正文翻译。
+- **持久化与边界**：`translation.rs::save()` 将完整中文 HTML 作为独立资料通过现有导入/索引/SQLite 保存，可独立打开和搜索。对齐信息位于 `index/translations/<source-id>.json`，记录源 SHA-256、译文 document ID、原文/中文 HTML；缓存以 NamedTempFile 原子替换。图片按哈希放在 `source/assets/<source-id>/`，两份 HTML 引用同一目录；HTML/Markdown 导入时收集同目录本地图片或可下载网页图片，`index/assets/<id>.json` 保存引用映射。阅读时只允许解析 `source/assets` 内的资源，不扩展前端任意文件读取。原件字节不改，SQLite schema/data version 不变。删除原文不清理共享图片，以保证独立译文可用；资源垃圾回收未实现。独立 HTML 对外复制/原文导出时仍需携带相对资源目录，未做自包含导出。
+- **阅读与上下文**：`TranslationView.tsx::alignedScroll()` 按段落 ID 和段内进度同步双向滚动。原生原文阅读器仍保留批注/目录；双语视图为只读对照，目前不提供新划词批注，目录按钮在该模式禁用。`ChatPanel.tsx` 在启动/启用 Agent、新建 Agent 对话时默认自动包含当前文档，随当前标签切换；范围复选框和文档标签可取消。恢复旧对话仍尊重保存的范围。设置弹窗切换 backend 也会触发默认值；手动取消后不会因普通重渲染重新勾选。
+- **图标**：`assets/icon.svg` 改为青绿色书页/岛屿图形，无文字字体依赖；`BrandMark.tsx` 统一应用内标识，Tauri CLI 从该 SVG 重新生成现有 PNG/ICO/ICNS/Windows Store 图标。不新增移动端图标或依赖。
+- **验证**：`npm test` 6 文件 29/29；`npm run build` 成功，主 JS 1,386.29 kB（gzip 420.50 kB），保留 >500 kB 提示；PDF.js 同时被 Reader 静态引用和翻译动态引用，Vite 提示不能独立分块，不影响构建。`cargo test --locked --manifest-path src-tauri/Cargo.toml --offline` 48 passed / 1 ignored（联网 OCR smoke），main/doc-tests 0；`cargo clippy --locked --manifest-path src-tauri/Cargo.toml --lib --offline` 完成，仅原有 5 条 warning。fmt/diff 检查通过。新回归覆盖全文长段分批、模型返回缺项/空项、取消、图片/表格/代码不丢、段落交替与同步定位、PDF 图形过滤/空白页/无 OCR 扫描页、独立译文往返/搜索/删除重建、共享图片在原文删除后仍可用、DOCX 图片/表格和资源路径边界、导入可选/局部失败继续、Agent 默认范围与取消。
+- **真实浏览器验证**：临时 React 页面配合模拟 IPC/API，用系统 Chrome 检查两种模式、合成 PDF 和图形、当前文档标签，无页面错误；HTML 两侧滚动值 900/1431 时均定位到 `block-7`。另外验证内嵌 CSS 保留颜色/居中/内联右对齐，且不修改应用 body。截图 `/tmp/knowledgemaster-bilingual-html.png`、`/tmp/knowledgemaster-bilingual-interleaved.png`、`/tmp/knowledgemaster-bilingual-pdf.png`，图标预览 `/tmp/knowledgemaster-icons/icon.png`。默认沙箱不能启动 Chrome，使用已获自动批准的临时无头浏览器运行；临时源码/合成 PDF 和 Vite 服务已清理。截图是模拟 API 结果，不是模型翻译质量或 Windows 真机验收。
+- **后续单一动作**：在测试资料库中用用户已配置的 API 实测一篇真实英文论文，核对全文、图片、复杂版式和翻译质量，再决定是否打包发布。尚无真实 API、macOS WebKit 或 Windows 桌面的端到端翻译验收；本轮不接触用户私有资料库。发布需按用户下一次授权同步新版本/标签，不能声称现有 v0.2.8 安装包已包含本轮功能。
+
+### 0.7 笔记搜索、知识关联图谱与天蓝主题（2026-11-06，本地未提交）
+
+- **最新需求与状态**：用户要求美化笔记/注释、支持直接搜索、类似 llm-wiki 的关系展示、手动或模型关联、选中项突出所有关联，以及把绿色主题改为类似 DeepSeek 的天蓝色。本节覆盖 0.6 节之后的新改动；保留全文翻译、默认 Agent 上下文等上一轮所有未提交修改。分支仍为 `tauri-codex`，HEAD 仍 `e39c1051`，版本仍 `0.2.8`；所有本轮变更及本文档均未暂存、未提交、未推送，没有新增标签、安装包或发布，没有在用户真实资料库运行迁移。
+- **卡片与搜索**：`NotesPanel.tsx` / `NoteCard.tsx` 用统一卡片展示独立笔记和阅读注释，显示类型、正文/摘录、来源、页码、日期和直接关联数；可筛选全部/笔记/注释。搜索在已加载资料中实时匹配标题、正文、注释文本、原文摘录及来源文档名，英文忽略大小写，多关键词同时匹配。总结编辑器仍保存 Markdown 与引用注释，并增加注释搜索和保存失败提示；不引入向量数据库。
+- **展示界面**：点击卡片或“知识图谱”打开通过 portal 显示的 `NotesWorkspace.tsx`，布局为搜索卡片索引 / 可缩放平移的 SVG 图谱 / Markdown 正文、摘录与关联详情。`NoteGraph.tsx` 用稳定的分簇布局保留所有节点（含孤立项）；`notes.ts` 将旧 `SummaryNote.annotationIDs` 引用与新关联合并去重。默认按完整连通链高亮，也可切到直接邻居、只看关联、清除选择、搜索节点，键盘可选择图谱节点。注释可在详情直接编辑或定位原文，笔记使用现有 Markdown 编辑器；删除项清理其边。
+- **手动与 AI**：支持笔记↔笔记、注释↔注释、笔记↔注释的无向关联，手动关联可填写说明，也可解除旧引用关系。`set_note_link` / `note_graph.rs::set_link()` 校验端点真实存在、禁止自关联、规范化端点顺序、防止反向重复，先保存副本成功后再更新内存。`suggest_note_links` 复用已配置的直接 API，不启动 CLI Agent；用户点击才发送所选项及候选节选。中英文关键词与汉字二元片段粗排后最多分析 40 个候选（每项正文 700 字，所选正文 4000 字），界面明确显示分析数量/总候选数量；最多返回 8 条带理由的建议，经用户逐条确认才写入。模型目标必须在候选白名单中，拒绝自造目标/重复/空理由；请求 180 秒超时。切换选中项后忽略旧请求的迟到结果。未用真实模型接口验证关联质量。
+- **数据与迁移**：新增 `models::NoteLink` 和 `KnowledgeData.note_links`（serde 缺字段默认为空）；SQLite **schema 从 1 升到 2**，data version 仍为 8。新增 `note_links` 表及既有实体指纹增量保存路径，记录端点 key（`note:<UUID>` / `annotation:<UUID>`）、理由、manual/model 来源与时间；唯一约束防重复。schema 1 首次打开时自动增加表，旧笔记、注释、Markdown 文件和旧引用关系保持不变，legacy JSON 无 noteLinks 也兼容。`delete_document`、`delete_annotation`、`delete_summary_note` 清理失效边，load/旧 JSON 迁移也规范化关联。新 schema 无法由只支持 schema 1 的旧安装包打开，应使用新版本测试；没有在本轮私自升级用户资料库。
+- **配色与图标**：主色 `#4d8dff`、强调 `#2d6be8`，白色工具栏与浅蓝面板；按钮、选中项、输入焦点、标注按钮、Agent 状态与深色模式均改用蓝色。`assets/icon.svg` 同步改为蓝色书页/岛屿，现有 PNG/ICO/ICNS/Windows Store 图标已由 Tauri CLI 重生。0.6 节的绿色设计已被本节替代。
+- **验证**：`npm test` 8 文件 38/38；`npm run build` 成功，主 JS 1,404.40 kB（gzip 426.21 kB），保留原有 >500 kB 与 PDF.js 静态/动态导入提示。`cargo test --locked --manifest-path src-tauri/Cargo.toml --offline` 52 passed / 1 ignored（联网 OCR smoke），main/doc-tests 0。`cargo clippy --locked --manifest-path src-tauri/Cargo.toml --lib --offline` 完成，仅原有 5 条 warning；fmt/diff 检查通过。新增覆盖全部三种端点组合、双向去重、自关联/不存在端点、保存往返与说明保留、删除原文清边、旧引用复用/解除、schema 1→2 幂等保留、模型返回白名单、搜索/全链和直接高亮、手动保存失败、建议确认后才保存、切换项后忽略迟到回复、详情编辑注释保留原文摘录。
+- **视觉证据与边界**：系统 Chrome + 临时真实 React App 页面、合成资料及模拟 IPC/API；1460×900、1000×760 和深色模式检查，无页面错误。5 节点样例中选中 1 个节点、高亮关联 3 个、无关项 1 个变淡；确认建议后连线 3→4。截图 `/tmp/knowledgemaster-notes-blue.png`、`/tmp/knowledgemaster-notes-graph.png`、`/tmp/knowledgemaster-notes-graph-dark.png`、`/tmp/knowledgemaster-notes-graph-small.png`；新版图标预览 `/tmp/knowledgemaster-blue-icons/icon.png`。临时预览源码与 Vite 服务已清理。样例不是用户笔记，也不是模型质量、WebKit 或 Windows 真机验收；关系是确认的显式边/旧引用，不自动把关键词相似认定为事实关系。
+- **下一步**：在测试资料库副本中用真实笔记确认搜索/编辑/关联/重启持久化，用已配置 API 评估关联建议和上一轮全文翻译质量；用户若要求交付，再同步新版本/标签打包。图谱大资料库可搜索/只看关联，尚无千级以上规模性能基线；当前不解析 Markdown `[[双链]]` 或提供 CLI Agent 自动写关系。
+
+### 0.8 macOS 免安装试用包（2026-11-06，已本地构建）
+
+- 用户要求构建免安装包试用。本机为 Apple Silicon/macOS，仅安装 `aarch64-apple-darwin` Rust target；已询问试用平台，初次按当前 Mac 平台先构建，用户随后明确确认 macOS Apple Silicon 解压即用版。Windows portable EXE 仍需 Windows runner，本轮没有执行提交、推送、CI 或公开发布。
+- `npm run tauri build -- --bundles app` 成功，release 优化编译 42.12 秒；生成 `src-tauri/target/release/bundle/macos/知屿 KnowledgeMaster.app`，主程序为 Mach-O arm64，最低 macOS 14.0，内置版本仍 `0.2.8`。包含 0.6 / 0.7 节全部未提交功能，与公开 v0.2.8 内容不同，不应混称同一正式发布。
+- 原始 bundle 的签名检查出现 `code has no resources but signature indicates they must be present`；复制到交付目录后使用 `codesign --force --deep --sign -` 重新做本地 ad-hoc 签名，`codesign --verify --deep --strict --verbose=2` 通过。未使用 Developer ID、未公证。
+- 交付 ZIP：[KnowledgeMaster-preview-20261106-macOS-arm64.zip](../release/KnowledgeMaster-preview-20261106-macOS-arm64.zip)，约 9 MiB；SHA-256 `43ac42f83b7a0a42c432a831c914fcde9cf4789f2260bd9d8bdf7ddd85b55c72`。解压后为同名目录，含 `知屿 KnowledgeMaster.app` 和 `试用说明.txt`，直接运行，无须复制到 Applications。`unzip -t`、用 ditto 解压后的签名验证和主程序哈希一致性检查均通过。
+- 包内仅应用和试用说明，不含资料库、API Key、本机配置、OCR 模型或 Python runtime。**本包仍使用原有本机设置/资料库路径**；用户首次运行前应备份资料库，若只试副本，应先在旧版设置切换到副本并退出旧版，再启动此包。schema 1→2 的实际升级发生于用户启动时；本轮没有启动应用或改动用户资料库。
+- `release/`、`src-tauri/target/` 均被 Git 忽略，安装包未跟踪；源码和本文档仍为未暂存/未跟踪修改，没有 Git 提交。本轮仅重做生产构建及包结构/签名校验，前端 38 项、Rust 52 项的功能测试证据沿用 0.7 节，未重复无关测试。
+
+### 0.9 普通内容展开与知识图谱入口分离（2026-11-06，r2 试用包已构建）
+
+- **用户纠正与当前行为**：知识关联作为独立界面，**只有点击“知识图谱”按钮才打开**。普通笔记/批注卡片只在当前列表内展开这一条 Markdown 正文/原文摘录及编辑、定位原文操作；再点同一张卡片收起，选择其他卡片只展开新的那条，不跳转图谱。这个要求取代 0.7 节中“点击卡片或知识图谱均打开图谱”的早期实现。
+- **实现范围**：`NotesPanel.tsx` 移除卡片点击中的 `setWorkspace(true)`，用同一个选中 key 控制单项展开，增加局部 `ExpandedNote`；`NoteCard.tsx` 为普通列表暴露 `aria-expanded`，图谱内卡片仍只作节点选择。展开区支持笔记编辑、注释就地编辑和定位原文。`NotesWorkspace` 的显式入口、关系管理和 AI 建议行为保持不变。本轮不改 Rust、数据库或迁移。
+- **验证**：`npm test` 8 文件 39/39；`npm run build` 及 `npm run tauri build -- --bundles app` 成功，保留既有 bundle/PDF.js 导入提示；`git diff --check` 通过。回归覆盖卡片展开时不存在图谱、一次仅展开一项、再次点击收起、显式图谱开关、普通展开区编辑注释且保留摘录；既有关联/AI 回归继续通过。Rust 功能测试沿用 0.7 节的 52 passed / 1 ignored，没有为纯前端入口调整重复运行。
+- **真实 UI**：临时真实 React App + 合成资料在 Chrome 中确认笔记与批注点击均 `expanded=1, graph=false`，批注仍展示原文摘录；只有点击图谱按钮才出现关联界面，无页面错误。截图 `/tmp/knowledgemaster-note-expanded.png`。临时预览源码与 Vite 服务已清理，没有启动桌面应用或读取用户资料库。
+- **交付**：新包 [KnowledgeMaster-preview-20261106-r2-macOS-arm64.zip](../release/KnowledgeMaster-preview-20261106-r2-macOS-arm64.zip)，9,465,982 bytes，SHA-256 `3d3ffdbfd3173922bcd69ff49e76b2641ac1c16c0b8467effe3930b1192262ab`。保留 0.8 节旧 ZIP，避免混淆。新包已 ad-hoc 签名并验证，ZIP 完整性、解压后签名和主程序哈希一致性通过；已确认主程序不同于 r1。适用 Apple Silicon/macOS 14+，使用前退出旧测试版。试用说明强调此轮不新增迁移，首次从旧正式版试用仍需遵守 0.8 节的资料库备份建议。
+- **Git 与下一步**：版本仍 `0.2.8`，分支/HEAD 不变，0.6–0.9 所有源码及交接修改均未暂存、未提交、未推送；ZIP 和 staging app 在忽略的 `release/` 下。请用户用 r2 验证普通阅读和显式图谱入口，后续按反馈迭代；没有公开发布。
+
+### 0.10 GitHub 提交推送（2026-11-06，进行中）
+
+- 用户已明确要求“提交 github”，授权把 0.6–0.9 节的功能、测试、图标和文档提交并推送到现有 `tauri-codex`；不包含发布标签、Release 或上传本地 ZIP。本次无需另开 PR，沿用当前分支交付。
+- 提交前核对本地 HEAD 与远端 `refs/heads/tauri-codex` 均为 `e39c1051cdbdfb5769b4965c053c565d733823d9`。52 个变更/新增文件均属于会话需求；凭据特征扫描未发现疑似私钥或访问令牌。`release/`、`dist/`、依赖和 `src-tauri/target/` 不入 Git。
+- 功能验证沿用 0.9 节前端 39/39、生产构建和 macOS r2 包校验，以及 0.7 节 Rust 52 passed / 1 ignored；代码在这些验证之后未改变，未重复运行无关测试。
+- 此刻为提交前记录，改动尚在工作区；后续提交号、推送与 CI 状态在操作成功后补充。分支 push 按既有工作流触发 macOS/Windows CI，不创建 `v*` 标签，因此不触发公开 Release 发布。
+
 ## 1. 项目定位与不可破坏的约束
 
 知屿 KnowledgeMaster 是面向科研论文学习的本地优先桌面知识工作台，正式实现同时支持 macOS 和 Windows。
@@ -89,7 +139,7 @@
 - 用户可以配置资料库目录；iCloud Drive、OneDrive 等同步依赖用户选择的系统同步路径。
 - 一个文档可以属于多个虚拟主题；从主题移除文档只删除关联，不删除原件。
 - Agent 不得直接修改或删除知识库原件。选定问答范围后，应用创建隔离临时工作区，并放入只读原件副本和已有解析缓存。
-- 未选择文本、文档或主题时默认纯聊天，不主动加载本地资料。
+- Agent 默认包含当前阅读文档，可手动取消；没有引用、已选文档/主题或当前文档时为纯聊天。直接 API 的初始范围仍为空。
 - API Key 只在发送请求、测试连接、保存或清除时访问，不能在应用启动、打开设置或切换模型时提前读取。
 - Claude Code/Codex 只有在本机检测到可执行文件时才能选择；应用退出时只终止由本次应用启动的 Agent 进程。
 - Agent 下载文件先进入待确认区，用户确认导入后还要确认虚拟主题。
@@ -177,7 +227,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 ## 5. 最近一次本地验证结果
 
-2026-10-27 当前功能验证见第 0.4 节；v0.2.8 提交/发布复验见 0.5 节。以下为 2026-09-11 发布基线的历史验证：
+2026-11-06 最新前端功能、入口纠正与试用包见 0.9 节；Rust/图谱基础验证见 0.7 节；翻译相关实现见 0.6 节；2026-10-27 的 OCR 验证见 0.4 节，v0.2.8 发布复验见 0.5 节。以下为 2026-09-11 发布基线的历史验证：
 
 - 2026-09-11 基线 `npm test`：1 个测试文件，12 项测试通过；测试优化后再次执行为 1 个测试文件、14 项测试通过。
 - 2026-09-11 `cargo test --manifest-path src-tauri/Cargo.toml`：29 项 Rust 测试通过（原基线 28 项）。
@@ -246,7 +296,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
     └── notes/                     # 总结类 Markdown 文件
 ```
 
-SQLite 使用 `rusqlite` bundled，当前 schema version 为 1，数据版本为 8。主要表：
+SQLite 使用 `rusqlite` bundled，当前本地源码 schema version 为 2（旧发布包为 1），数据版本为 8；1→2 的自动迁移见 0.7 节。主要表：
 
 - `documents`、`document_authors`
 - `topics`、`document_topics`
@@ -255,7 +305,7 @@ SQLite 使用 `rusqlite` bundled，当前 schema version 为 1，数据版本为
 - `conversations`、`conversation_documents`、`conversation_topics`、`conversation_messages`
 - `agent_sessions`
 - `topic_summaries`
-- `summary_notes`、`summary_note_annotations`
+- `summary_notes`、`summary_note_annotations`、`note_links`
 - `entity_fingerprints`
 
 数据库启用外键，使用 rollback journal（`journal_mode=DELETE`）和 `synchronous=FULL`。这是为了避免 WAL sidecar 在 iCloud/OneDrive 等同步目录中造成额外一致性问题。不要未经迁移设计就改用 WAL。
@@ -327,7 +377,9 @@ GitHub Actions 文件：`.github/workflows/tauri-ci.yml`
 
 ## 11. 当前工作树和本轮变更
 
-当前功能、版本、README、测试和 CI 共 22 个文件已提交为 `fb59f558` 并推送/发布 v0.2.8；其中包含此前未跟踪的 `ocr.rs`、`ocr_worker.py`、`App.test.tsx`、`SettingsModal.test.tsx`。提交前工作区既有的 `docs/HANDOFF.md` 进度也已保留。本次最终发布证据仅修改本文档，随 docs-only 后续提交推送；不重新移动发布标签。提交后应没有未暂存、暂存或未跟踪源码。
+2026-11-06 当前存在 0.6 / 0.7 / 0.9 节所列的未暂存修改与未跟踪源码/测试，本地 r1/r2 包位于忽略的 release/；本文档最新修改也仅在工作区。没有执行 Git 提交或发布。
+
+以下为 2026-10-27 发布后的历史状态：功能、版本、README、测试和 CI 共 22 个文件已提交为 `fb59f558` 并推送/发布 v0.2.8；其中包含此前未跟踪的 `ocr.rs`、`ocr_worker.py`、`App.test.tsx`、`SettingsModal.test.tsx`。提交前工作区既有的 `docs/HANDOFF.md` 进度也已保留。本次最终发布证据仅修改本文档，随 docs-only 后续提交推送；不重新移动发布标签。当时提交后工作区干净；这不适用于 0.6 节的本地新功能。
 
 下面是已提交为 `10b70887` 的 2026-10-26 首轮修复历史清单，不能视作当前未提交文件清单：
 
@@ -358,4 +410,4 @@ GitHub Actions 文件：`.github/workflows/tauri-ci.yml`
 
 可以把下面内容作为新窗口的第一条消息：
 
-> 请先阅读 `/Users/hank/Desktop/知识整理器/docs/HANDOFF.md`，并遵循当前窗口提供的 `AGENTS.md` 指令。核对 `git status`、当前分支、远端 HEAD、GitHub Actions 和 Release 后继续工作；任何提交、推送或发布动作按我当前请求的范围执行。
+> 请先阅读 `/Users/hank/Desktop/知识整理器/docs/HANDOFF.md`，尤其是 0.6 / 0.7 / 0.9 节未提交的翻译、笔记图谱、Agent 默认上下文和天蓝主题；注意普通卡片只展开单项，图谱只能通过专用按钮打开，最新试用包为 r2；先保留这些改动，在测试资料库副本中验证真实笔记与论文。遵循当前窗口提供的 `AGENTS.md` 指令。核对 `git status`、当前分支、远端 HEAD、GitHub Actions 和 Release 后继续工作；任何提交、推送或发布动作按我当前请求的范围执行。

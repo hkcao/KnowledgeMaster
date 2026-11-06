@@ -6,10 +6,12 @@ import type {
   AppSettings,
   BootstrapState,
   Conversation,
+  DocumentTranslation,
   KnowledgeAnnotation,
   KnowledgeData,
   LibraryRefreshResult,
   OcrStatus,
+  NoteSuggestions,
   ReaderDocumentPayload,
   ReaderQuote,
   SummaryNote,
@@ -52,6 +54,9 @@ export const api = {
   applyRecommendations: (documentId: UUID, topicIds: UUID[]) =>
     invoke<KnowledgeData>("apply_recommendations", { documentId, topicIds }),
   documentPayload: (id: UUID) => invoke<ReaderDocumentPayload>("document_payload", { id }),
+  translateSegments: (texts: string[]) => invoke<string[]>("translate_segments", { texts }),
+  loadTranslation: (id: UUID) => invoke<DocumentTranslation | null>("load_translation", { id }),
+  saveTranslation: (value: DocumentTranslation) => invoke<KnowledgeData>("save_translation", { value }),
   addAnnotation: (
     documentId: UUID,
     quote: string,
@@ -76,6 +81,9 @@ export const api = {
   saveSummaryNote: (note: Partial<SummaryNote> & { title: string; content: string; annotationIDs: UUID[] }) =>
     invoke<KnowledgeData>("save_summary_note", { note }),
   deleteSummaryNote: (id: UUID) => invoke<KnowledgeData>("delete_summary_note", { id }),
+  setNoteLink: (source: string, target: string, linked: boolean, reason = "", createdBy: "manual" | "model" = "manual") =>
+    invoke<KnowledgeData>("set_note_link", { source, target, linked, reason, createdBy }),
+  suggestNoteLinks: (source: string) => invoke<NoteSuggestions>("suggest_note_links", { source }),
   saveConversation: (conversation: Conversation) =>
     invoke<KnowledgeData>("save_conversation", { conversation }),
   saveApiKey: (key: string) => invoke<void>("save_api_key", { key }),

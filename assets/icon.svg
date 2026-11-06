@@ -1,12 +1,18 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <defs>
-    <linearGradient id="g" x1="128" y1="80" x2="896" y2="944" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#247DFF"/>
-      <stop offset="1" stop-color="#6456D8"/>
+    <linearGradient id="ocean" x1="164" y1="104" x2="860" y2="932" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#285DE0"/><stop offset=".58" stop-color="#4D92FA"/><stop offset="1" stop-color="#8CCBFF"/>
+    </linearGradient>
+    <linearGradient id="paper" x1="300" y1="304" x2="720" y2="670" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/><stop offset="1" stop-color="#E4F2FF"/>
     </linearGradient>
   </defs>
-  <rect x="64" y="64" width="896" height="896" rx="224" fill="url(#g)"/>
-  <text x="512" y="675" text-anchor="middle" fill="white"
-        font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif"
-        font-size="500" font-weight="750">屿</text>
+  <rect x="64" y="64" width="896" height="896" rx="212" fill="url(#ocean)"/>
+  <rect x="65.5" y="65.5" width="893" height="893" rx="210.5" fill="none" stroke="#FFF" stroke-opacity=".15" stroke-width="3"/>
+  <circle cx="738" cy="288" r="44" fill="#CAE9FF"/>
+  <path d="M236 350Q376 290 492 364V704Q374 634 236 680Z" fill="url(#paper)"/>
+  <path d="M532 364Q648 290 788 350V680Q650 634 532 704Z" fill="url(#paper)"/>
+  <path d="M290 415Q376 386 438 420M290 472Q376 443 438 477M586 420Q648 386 734 415M586 477Q648 443 734 472" fill="none" stroke="#3475D9" stroke-opacity=".34" stroke-width="17" stroke-linecap="round"/>
+  <path d="M355 625L428 535L484 590L552 493L675 625Q512 584 355 625Z" fill="#4C8CEB"/>
+  <path d="M274 755Q397 721 512 755T750 755" fill="none" stroke="#DCEFFF" stroke-width="22" stroke-linecap="round"/>
 </svg>

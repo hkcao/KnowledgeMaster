@@ -28,7 +28,12 @@ KnowledgeMaster brings paper collection, close reading and annotation, research 
 - Selected-region AI context includes extracted source text and, when multimodal input is enabled, a screenshot of the selected region.
 - Annotation markers stay in the page margin. Click a highlighted or underlined region to edit its note or delete the annotation.
 - Summary notes are stored as Markdown files and can reference multiple source annotations.
+- Notes and annotations appear as searchable cards. Search titles, content, original excerpts, and source document names, then click a card to expand only that item for reading and editing. The knowledge graph opens only through its dedicated button.
+- Connect any pair of notes or annotations in a zoomable, pannable knowledge graph. Existing annotation references appear automatically. Selecting a node highlights its entire connected chain or just direct neighbors.
+- The configured API can suggest connections with explanations; suggestions are saved only after confirmation. For larger libraries, analysis uses the 40 most relevant candidates and displays its scope.
 - Export either the original document or a copy with annotations.
+- Optionally translate full documents into Chinese when importing files, folders, dropped files, or web pages, using the configured API. Existing documents have a Translate action. Originals are retained and a searchable Chinese HTML document shares the library's image resources.
+- Read alternating source/Chinese paragraphs or parallel panes with paragraph-based synchronized scrolling. Text PDFs retain page graphics and text positions; scanned pages retain the scan with translated OCR below it. DOCX preserves paragraphs, tables, and embedded images; complex Word pagination and floating layouts may differ. Convert DOC to DOCX/PDF first. Code and formulas stay unchanged.
 
 ### AI and Local Agents
 
@@ -37,6 +42,7 @@ KnowledgeMaster brings paper collection, close reading and annotation, research 
 - Connect to locally installed Claude Code and Codex CLIs, inspect their collapsible execution logs, and stop a running task manually.
 - Select multiple documents or topics as the Q&A scope. Agent mode creates an isolated temporary workspace for that scope.
 - Agents receive read-only copies of original files and can reuse existing PDF, OCR, or parsing caches instead of relying on pre-chunked text.
+- Activating an Agent or starting a new Agent conversation selects the currently displayed document by default. The selection follows the current tab and can be cleared in the scope picker or document chip.
 - With no selected text, files, or topics, chat starts without loading local documents.
 - Files downloaded by an Agent enter a pending-import area. The user confirms both the import and its virtual topics.
 - Preserve conversation history and generate incremental Markdown summaries.

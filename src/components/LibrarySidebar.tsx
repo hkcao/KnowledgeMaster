@@ -31,6 +31,8 @@ import type {
 } from "../types";
 import { displayTitle, formatBytes } from "../utils";
 import NotesPanel from "./NotesPanel";
+import BrandMark from "./BrandMark";
+import { translateDocument } from "../translation";
 
 interface Props {
   data: KnowledgeData;
@@ -40,6 +42,7 @@ interface Props {
   externalRecommendationIds?: UUID[];
   refreshWarnings?: string[];
   onData: (data: KnowledgeData) => void;
+  onImportPaths: (paths: string[]) => void;
   onReload: () => Promise<KnowledgeData>;
   onExternalRecommendationsHandled?: () => void;
   onOpenDocument: (document: KnowledgeDocument) => void;
@@ -121,6 +124,7 @@ export default function LibrarySidebar(props: Props) {
   const [moveRequest, setMoveRequest] = useState<MoveRequest | null>(null);
   const [webDialog, setWebDialog] = useState(false);
   const [webURL, setWebURL] = useState("");
+  const [translateWeb, setTranslateWeb] = useState(false);
   const [webImportProgress, setWebImportProgress] = useState<WebImportProgress | null>(null);
   const [webImportElapsed, setWebImportElapsed] = useState(0);
   const [webImportError, setWebImportError] = useState("");
@@ -187,12 +191,7 @@ export default function LibrarySidebar(props: Props) {
 
   async function importPaths(paths: string[]) {
     if (!paths.length) return;
-    const before = new Set(data.documents.map((document) => document.id));
-    const messages = await api.importFiles(paths);
-    setMessage(messages.join(" · "));
-    const next = await onReload();
-    const imported = next.documents.filter((document) => !before.has(document.id));
-    await showRecommendations(imported);
+    props.onImportPaths(paths);
   }
 
   async function pickFiles() {
@@ -247,6 +246,17 @@ export default function LibrarySidebar(props: Props) {
       setWebImportProgress({ importId, stage: "refreshing", detail: "正在刷新知识目录…" });
       const next = await onReload();
       const imported = next.documents.filter((document) => !before.has(document.id));
+      if (translateWeb) {
+        for (const document of imported) {
+          try {
+            const translated = await translateDocument(document, (detail) => setWebImportProgress({ importId, stage: "extracting", detail }));
+            if (translated) onData(translated);
+          } catch (error) {
+            setWebImportError(`原文已导入；${String(error)}。可在阅读器中重试全文翻译。`);
+            return;
+          }
+        }
+      }
       setWebDialog(false);
       setWebURL("");
       await showRecommendations(imported);
@@ -372,7 +382,7 @@ export default function LibrarySidebar(props: Props) {
   return (
     <aside className="library-sidebar" data-testid="library-sidebar">
       <header className="library-header">
-        <div className="brand"><span className="brand-mark">屿</span><strong>知屿</strong></div>
+        <div className="brand"><BrandMark /><strong>知屿</strong></div>
         <button className="icon-button" title="设置" onClick={props.onOpenSettings}><Settings size={17} /></button>
       </header>
       <div className="segmented">
@@ -496,6 +506,7 @@ export default function LibrarySidebar(props: Props) {
             <h2>导入网页</h2>
             <p className="muted">普通网页将以 HTML 原文保存；链接实际返回 PDF 时会直接下载为 PDF。两种格式均可阅读、检索并用于 AI 问答。</p>
             <input autoFocus disabled={Boolean(webImportProgress)} value={webURL} onChange={(event) => setWebURL(event.target.value)} placeholder="https://example.com/article" />
+            <label><input type="checkbox" checked={translateWeb} disabled={Boolean(webImportProgress)} onChange={(event) => setTranslateWeb(event.target.checked)} />导入后全文翻译为中文（使用已配置的 API）</label>
             {webImportProgress && (
               <div className="web-import-progress" role="status" aria-live="polite">
                 <div className="web-import-progress-head">

@@ -1,10 +1,13 @@
 mod agent;
 mod ai;
 mod database;
+mod document_assets;
 mod export;
 mod models;
+mod note_graph;
 mod ocr;
 mod store;
+mod translation;
 
 use crate::{
     models::*,
@@ -444,6 +447,32 @@ fn document_payload(state: State<'_, AppState>, id: Uuid) -> Result<ReaderDocume
     store::reader_payload(&inner, id)
 }
 
+#[tauri::command]
+async fn translate_segments(
+    state: State<'_, AppState>,
+    texts: Vec<String>,
+) -> Result<Vec<String>, String> {
+    translation::translate(&state, texts).await
+}
+
+#[tauri::command(async)]
+fn load_translation(
+    state: State<'_, AppState>,
+    id: Uuid,
+) -> Result<Option<translation::Translation>, String> {
+    let inner = state.inner.lock().map_err(error)?;
+    translation::load(&inner, id)
+}
+
+#[tauri::command(async)]
+fn save_translation(
+    state: State<'_, AppState>,
+    value: translation::Translation,
+) -> Result<KnowledgeData, String> {
+    let mut inner = state.inner.lock().map_err(error)?;
+    translation::save(&mut inner, value)
+}
+
 fn annotation_rects_overlap(left: &AnnotationRect, right: &AnnotationRect) -> bool {
     if left.page != right.page {
         return false;
@@ -532,6 +561,7 @@ fn delete_annotation(state: State<'_, AppState>, id: Uuid) -> Result<KnowledgeDa
         note.annotation_ids
             .retain(|annotation_id| *annotation_id != id);
     }
+    note_graph::prune(&mut inner.data);
     save_data(&inner.root, &inner.data)?;
     Ok(inner.data.clone())
 }
@@ -588,8 +618,31 @@ fn delete_summary_note(state: State<'_, AppState>, id: Uuid) -> Result<Knowledge
         }
     }
     inner.data.summary_notes.retain(|note| note.id != id);
+    note_graph::prune(&mut inner.data);
     save_data(&inner.root, &inner.data)?;
     Ok(inner.data.clone())
+}
+
+#[tauri::command(async)]
+fn set_note_link(
+    state: State<'_, AppState>,
+    source: String,
+    target: String,
+    reason: String,
+    linked: bool,
+    created_by: String,
+) -> Result<KnowledgeData, String> {
+    let mut inner = state.inner.lock().map_err(error)?;
+    note_graph::set_link(&mut inner, source, target, reason, linked, created_by)
+}
+
+#[tauri::command]
+async fn suggest_note_links(
+    state: State<'_, AppState>,
+    source: String,
+) -> Result<NoteSuggestions, String> {
+    let inner = snapshot(&state)?;
+    note_graph::suggest(&state, &inner, &source).await
 }
 
 #[tauri::command(async)]
@@ -807,11 +860,16 @@ pub fn run() {
             recommend_topics,
             apply_recommendations,
             document_payload,
+            translate_segments,
+            load_translation,
+            save_translation,
             add_annotation,
             update_annotation,
             delete_annotation,
             toggle_bookmark,
             save_summary_note,
+            set_note_link,
+            suggest_note_links,
             delete_summary_note,
             save_conversation,
             save_api_key,
