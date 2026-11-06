@@ -19,7 +19,7 @@
 - **发布与下载恢复**：最初创建 Release `v0.3.0` 草稿并上传本地严格验签通过的 Mac ZIP；后续已替换为云端包并公开，详见下一条。从 Actions 下载 Windows 附件连续经本机代理、提权代理与直连均长期无进展，已终止这三次本次任务进程；不改动系统代理。`gh run view --log-failed` 默认缓存路径被沙箱拒绝，改用 `XDG_CACHE_HOME=/tmp/km-gh-cache` 后获得日志。新增 workflow_dispatch `release_tag`，使用当前 workflow 定义但 checkout 不可变版本标签，验证 tag 与 package.json 版本一致后重跑两平台、Windows OCR smoke 并由 runner 直接汇总上传；添加 SHA256SUMS.txt，避免本机下载成为发布依赖。
 - **正式发布验证**：workflow_dispatch [42182882996](https://github.com/hkcao/KnowledgeMaster/actions/runs/42182882996) **completed / success**；macOS、Windows、Publish release packages 三个 job 均 success，包含两平台前端 / Rust debug+release、Windows 真 CPU OCR 安装识别、Mac ZIP 解压 strict 验签、Windows ZIP 解压 EXE 哈希一致性。runner 直接汇总上传全部包，绕过本机 Actions 附件下载停滞。已核验 [v0.3.0](https://github.com/hkcao/KnowledgeMaster/releases/tag/v0.3.0) **非 draft / 非 prerelease**，published `2026-11-06T07:57:46Z`，并设置为 latest；标签仍指向应用提交 `f21fc125`，未移动。
 - **公开资产**：Mac portable ZIP `KnowledgeMaster-0.3.0-macOS-arm64-portable.zip` **9,632,215 bytes / SHA-256 da552c2945cb45bee71be4ab5623ff6b89b16220375ccd99a6a6abbfa92d14f0**；Windows portable ZIP `KnowledgeMaster-0.3.0-Windows-x64-portable.zip` **9,709,986 bytes / d4e1067813710b57a9385c5e42eb15ba86bd2a3b673434ca8210007b792b58b3**；单独 `KnowledgeMaster-portable.exe` **23,771,648 bytes / c5536e19ac48e787570a044e2a488cc9cdb664c5ac34d8c7b3eaa5cc354d68aa**。另有 `KnowledgeMaster_0.3.0_aarch64.dmg`（9,782,430 bytes）、`KnowledgeMaster_0.3.0_x64-setup.exe`（7,302,154 bytes）与 `SHA256SUMS.txt`（523 bytes / SHA-256 `01c647ffbd461a3024daa4060ed67683be2bd124f7c5916a26ed20ce5cd40b45`）。公开校验文件已下载，初版内容的 5 个哈希与 GitHub asset digest 一致，但 DMG / NSIS 本地文件名前带“知屿 ”，GitHub 上传时自动去除了此前缀；已修正校验文件的名称并重新上传（包内容和 digest 不变），同时在 workflow 生成校验前去除此已知产品前缀。直接抽取执行 workflow 的实际 Python 段，在临时目录以中文 / ASCII 文件名验证改名和 SHA256SUMS 内容通过。以上数值来自当前 GitHub asset metadata / digest；正式 Mac ZIP 已由云端产物替换草稿中先传的本地 ZIP，两者构建环境不同、哈希不同，不能混用。
-- **工作区 / 下一步**：功能 `f21fc125`、runner 修复 `f2137266`、app,dmg / dispatch 与 README 图示 `5dbe9b51` 均已推送 main，应用源码和版本清单与不可变 v0.3.0 标签 diff 为空。现在 workflow 校验文件名修复和本文为发布后的未暂存补记，将通过紧接的 CI / docs skip ci 提交推送；最终 main tip 用 `git log` / `git ls-remote` 核对，无其他未提交源码。临时 UI 源码和 Vite 已清理，本次停滞下载进程已终止。交付已完成；下一步由用户在备份或测试资料库中试用真实 API / CLI 翻译质量及 Windows UI。包和校验下载在 ignored release/，不进 Git。
+- **工作区 / 下一步**：功能 `f21fc125`、runner 修复 `f2137266`、app,dmg / dispatch 与 README 图示 `5dbe9b51` 均已推送 main，应用源码和版本清单与不可变 v0.3.0 标签 diff 为空。workflow 校验文件名修复和发布交接已随 `56bb2099` 推送，本节最终 Git 措辞作为紧接的 docs-only / skip ci 交接补记一并交付；最终 main tip 用 `git log` / `git ls-remote` 核对，无其他未提交源码。临时 UI 源码和 Vite 已清理，本次停滞下载进程已终止。交付已完成；下一步由用户在备份或测试资料库中试用真实 API / CLI 翻译质量及 Windows UI。包和校验下载在 ignored release/，不进 Git。
 
 ## 0. 首轮 Windows PDF 刷新闪退修复（2026-10-26）
 
@@ -404,7 +404,7 @@ GitHub Actions 文件：`.github/workflows/tauri-ci.yml`
 
 ## 11. 当前工作树和本轮变更
 
-2026-11-06 v0.3.0 已公开发布，两平台与发布流水线 `42182882996` 全部 success。功能和 CI / README 均已提交推送 main；本文和 workflow 校验文件名修复为发布后补记，将随紧接的 CI / docs skip ci 提交推送。没有未提交应用源码；release/、target/、dist/ 和依赖均忽略，未提交用户资料、凭据或本地构建产物。详细提交、发布资产与校验值以文首当前进度为准。
+2026-11-06 v0.3.0 已公开发布，两平台与发布流水线 `42182882996` 全部 success。功能和 CI / README 均已提交推送 main；本文与 workflow 校验文件名修复已随 `56bb2099` 推送，本节最终措辞通过紧接的 docs-only / skip ci 提交交付。没有未提交应用源码；release/、target/、dist/ 和依赖均忽略，未提交用户资料、凭据或本地构建产物。详细提交、发布资产与校验值以文首当前进度为准。
 
 以下为 2026-10-27 发布后的历史状态：功能、版本、README、测试和 CI 共 22 个文件已提交为 `fb59f558` 并推送/发布 v0.2.8；其中包含此前未跟踪的 `ocr.rs`、`ocr_worker.py`、`App.test.tsx`、`SettingsModal.test.tsx`。提交前工作区既有的 `docs/HANDOFF.md` 进度也已保留。本次最终发布证据仅修改本文档，随 docs-only 后续提交推送；不重新移动发布标签。当时提交后工作区干净；这不适用于 0.6 节的本地新功能。
 
